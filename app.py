@@ -290,6 +290,21 @@ with st.container(border=True):
             base_value = 0
 
         if item["typ"] == "Základ":
+            hodnota_txt = f"{int(base_value)} ks"
+        else:
+            hodnota_txt = f"{int(base_value)} g"
+
+    st.write(f"• {item['surovina']} – {hodnota_txt}")
+
+    if pd.isna(value) or value == "":
+        hodnota_txt = "❗ chybí"
+    else:
+        try:
+            base_value = float(value)
+        except:
+            base_value = 0
+
+        if item["typ"] == "Základ":
             total = base_value * pocet_kusu
             hodnota_txt = f"{int(total)} ks"
         else:
