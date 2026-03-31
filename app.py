@@ -14,6 +14,7 @@ EXPORT_FILE = os.path.join(BASE_DIR, "export.xlsx")
 OPRAVY_FILE = os.path.join(DATA_DIR, "opravy.xlsx")
 EXPORT_SHEET = "export"
 
+
 def clean_value(v):
     if pd.isna(v):
         return ""
@@ -133,13 +134,13 @@ def parse_product_row(row):
     if col_zaklad:
         zaklad = clean_value(row[col_zaklad])
         if zaklad:
-            gramaz = row[col_pocet] if col_pocet else ""
-            if pd.isna(gramaz):
-                gramaz = ""
+            hodnota = row[col_pocet] if col_pocet else ""
+            if pd.isna(hodnota):
+                hodnota = ""
             items.append({
                 "typ": "Základ",
                 "surovina": zaklad,
-                "gramaz": gramaz
+                "gramaz": hodnota
             })
 
     # Mazání
@@ -184,12 +185,35 @@ def parse_product_row(row):
     return items
 
 
+def format_overview_value(item_type, value):
+    if pd.isna(value) or value == "":
+        return "❗ chybí"
+
+    if item_type == "Základ":
+        return f"{value} ks"
+
+    return f"{value} g"
+
+
+def get_default_numeric_value(value):
+    if pd.isna(value) or value == "":
+        return 0.0
+
+    try:
+        return float(value)
+    except Exception:
+        return 0.0
+
+
 # ===== START APPKY =====
 ensure_data_dir()
 ensure_opravy_file()
 
+if "changes" not in st.session_state:
+    st.session_state.changes = {}
+
 st.title("Kontrola produktů")
-st.write("Vyhledej produkt, uprav gramáže a ulož opravu.")
+st.write("Vyber produkt → uprav hodnoty → klikni uložit vše")
 
 jmeno = st.selectbox(
     "Kdo upravuje",
@@ -208,7 +232,7 @@ if not product_col:
 df = df[df[product_col].notna()].copy()
 df[product_col] = df[product_col].astype(str).str.strip()
 
-search = st.text_input("Hledat produkt", "")
+search = st.text_input("Hledat produkt", "", placeholder="např. croissant")
 
 if search.strip():
     filtered = df[df[product_col].str.contains(search, case=False, na=False)].copy()
@@ -238,12 +262,49 @@ row = product_rows.iloc[0]
 slozeni = parse_product_row(row)
 
 st.subheader(f"Produkt: {clean_value(row[product_col])}")
+pocet_kusu = st.number_input(
+    "Kolik kusů vyrábíme",
+    min_value=1,
+    step=1,
+    value=1
+)
 
 if not slozeni:
     st.warning("U produktu jsem nenašla žádné složení.")
     st.stop()
 
+# ===== RYCHLÝ PŘEHLED =====
+with st.container(border=True):
+    st.markdown("### 🧾 Co potřebujeme")
+    st.markdown(f"**{clean_value(row[product_col])}**")
+
+    for item in slozeni:
+    value = item["gramaz"]
+
+    if pd.isna(value) or value == "":
+        hodnota_txt = "❗ chybí"
+    else:
+        try:
+            base_value = float(value)
+        except:
+            base_value = 0
+
+        if item["typ"] == "Základ":
+            total = base_value * pocet_kusu
+            hodnota_txt = f"{int(total)} ks"
+        else:
+            total = base_value * pocet_kusu
+            hodnota_txt = f"{int(total)} g"
+
+    st.write(f"• {item['surovina']} – {hodnota_txt}")
+
+st.divider()
+st.markdown("### Úpravy")
+
+# ===== FORMULÁŘ PRO ÚPRAVY =====
 for idx, item in enumerate(slozeni):
+    item_key = f"{selected}_{idx}"
+
     with st.container(border=True):
         st.markdown(f"**{item['typ']}**")
         st.write(f"**Surovina:** {item['surovina']}")
@@ -254,50 +315,84 @@ for idx, item in enumerate(slozeni):
         else:
             puvodni_display = puvodni
 
+        if item["typ"] == "Základ":
+            aktualni_label = "Aktuální počet kusů"
+            input_label = "Nový počet kusů"
+            jednotka_text = "ks"
+        else:
+            aktualni_label = "Aktuální gramáž"
+            input_label = "Nová gramáž"
+            jednotka_text = "g"
+
         st.write(
-            f"**Aktuální gramáž:** {puvodni_display if puvodni_display != '' else 'NENÍ VYPLNĚNA'}"
+            f"**{aktualni_label}:** {puvodni_display if puvodni_display != '' else 'NENÍ VYPLNĚNO'}"
         )
 
         if puvodni_display == "":
-            st.warning("Chybí gramáž – doplň ji.")
-            default_value = 0.0
-            label = "Doplň gramáž"
-        else:
-            try:
-                default_value = float(puvodni_display)
-            except Exception:
-                default_value = 0.0
-            label = "Uprav gramáž"
+            st.warning(f"Chybí hodnota – doplň ji ({jednotka_text}).")
 
-        nova_gramaz = st.number_input(
-            label,
+        default_value = get_default_numeric_value(puvodni_display)
+
+        nova_hodnota = st.number_input(
+            input_label,
             min_value=0.0,
             step=1.0,
             value=float(default_value),
-            key=f"gram_{selected}_{idx}"
+            key=f"gram_{item_key}"
         )
 
         poznamka = st.text_input(
             "Poznámka",
-            key=f"note_{selected}_{idx}",
+            key=f"note_{item_key}",
             placeholder="např. chyběla gramáž / má být víc / má být méně"
         )
 
-        if st.button("💾 Uložit opravu", key=f"save_{selected}_{idx}"):
-            if nova_gramaz <= 0:
-                st.error("Zadej gramáž větší než 0.")
-            else:
-                uloz_opravu(
-                    jmeno=jmeno,
-                    produkt=clean_value(row[product_col]),
-                    typ=item["typ"],
-                    surovina=item["surovina"],
-                    puvodni=puvodni_display,
-                    nova=nova_gramaz,
-                    poznamka=poznamka
-                )
-                st.success("Oprava byla uložena.")
-                st.rerun()
+        st.session_state.changes[item_key] = {
+            "produkt": clean_value(row[product_col]),
+            "typ": item["typ"],
+            "surovina": item["surovina"],
+            "puvodni": puvodni_display,
+            "nova": nova_hodnota,
+            "poznamka": poznamka
+        }
+
+st.divider()
+
+if st.button("💾 Uložit všechny změny", use_container_width=True):
+    valid_changes = []
+    invalid_items = []
+
+    for change in st.session_state.changes.values():
+        if change["produkt"] != clean_value(row[product_col]):
+            continue
+
+        if float(change["nova"]) <= 0:
+            invalid_items.append(change["surovina"])
+        else:
+            valid_changes.append(change)
+
+    if invalid_items:
+        st.error(
+            "Tyto položky mají hodnotu 0 nebo méně: "
+            + ", ".join(invalid_items)
+        )
+    elif not valid_changes:
+        st.warning("Nenašla jsem žádné změny k uložení.")
+    else:
+        for change in valid_changes:
+            uloz_opravu(
+                jmeno=jmeno,
+                produkt=change["produkt"],
+                typ=change["typ"],
+                surovina=change["surovina"],
+                puvodni=change["puvodni"],
+                nova=change["nova"],
+                poznamka=change["poznamka"]
+            )
+
+        st.success("Všechny změny byly uloženy.")
+        st.session_state.changes = {}
+        st.rerun()
 
 st.divider()
 st.subheader("Schvalování oprav")
@@ -307,15 +402,21 @@ opravy_df = load_opravy()
 if opravy_df.empty:
     st.info("Žádné opravy.")
 else:
-    for i, row_o in opravy_df.sort_values("datum", ascending=False).iterrows():
+    opravy_sorted = opravy_df.sort_values("datum", ascending=False)
+
+    for i, row_o in opravy_sorted.iterrows():
         with st.container(border=True):
             st.write(f"🕒 {row_o.get('datum', '')}")
             st.write(f"👤 {row_o.get('jmeno', '')}")
             st.write(f"🍽️ {row_o.get('produkt', '')}")
             st.write(f"📂 {row_o.get('typ', '')}")
             st.write(f"🥗 {row_o.get('surovina', '')}")
-            st.write(f"**Původní gramáž:** {row_o.get('puvodni_gramaz', '')}")
-            st.write(f"**Nová gramáž:** {row_o.get('nova_gramaz', '')}")
+
+            typ_o = clean_value(row_o.get("typ", ""))
+            jednotka = "ks" if typ_o == "Základ" else "g"
+
+            st.write(f"**Původní hodnota:** {row_o.get('puvodni_gramaz', '')} {jednotka}")
+            st.write(f"**Nová hodnota:** {row_o.get('nova_gramaz', '')} {jednotka}")
 
             poznamka_val = row_o.get("poznamka", "")
             if clean_value(poznamka_val):
