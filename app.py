@@ -185,16 +185,6 @@ def parse_product_row(row):
     return items
 
 
-def format_overview_value(item_type, value):
-    if pd.isna(value) or value == "":
-        return "❗ chybí"
-
-    if item_type == "Základ":
-        return f"{value} ks"
-
-    return f"{value} g"
-
-
 def get_default_numeric_value(value):
     if pd.isna(value) or value == "":
         return 0.0
@@ -262,6 +252,7 @@ row = product_rows.iloc[0]
 slozeni = parse_product_row(row)
 
 st.subheader(f"Produkt: {clean_value(row[product_col])}")
+
 pocet_kusu = st.number_input(
     "Kolik kusů vyrábíme",
     min_value=1,
@@ -276,42 +267,27 @@ if not slozeni:
 # ===== RYCHLÝ PŘEHLED =====
 with st.container(border=True):
     st.markdown("### 🧾 Co potřebujeme")
-    st.markdown(f"**{clean_value(row[product_col])}**")
+    st.markdown(f"**{clean_value(row[product_col])} ({pocet_kusu} ks)**")
 
     for item in slozeni:
-    value = item["gramaz"]
+        value = item["gramaz"]
 
-    if pd.isna(value) or value == "":
-        hodnota_txt = "❗ chybí"
-    else:
-        try:
-            base_value = float(value)
-        except:
-            base_value = 0
-
-        if item["typ"] == "Základ":
-            hodnota_txt = f"{int(base_value)} ks"
+        if pd.isna(value) or value == "":
+            hodnota_txt = "❗ chybí"
         else:
-            hodnota_txt = f"{int(base_value)} g"
+            try:
+                base_value = float(value)
+            except Exception:
+                base_value = 0.0
 
-    st.write(f"• {item['surovina']} – {hodnota_txt}")
-
-    if pd.isna(value) or value == "":
-        hodnota_txt = "❗ chybí"
-    else:
-        try:
-            base_value = float(value)
-        except:
-            base_value = 0
-
-        if item["typ"] == "Základ":
             total = base_value * pocet_kusu
-            hodnota_txt = f"{int(total)} ks"
-        else:
-            total = base_value * pocet_kusu
-            hodnota_txt = f"{int(total)} g"
 
-    st.write(f"• {item['surovina']} – {hodnota_txt}")
+            if item["typ"] == "Základ":
+                hodnota_txt = f"{int(total)} ks"
+            else:
+                hodnota_txt = f"{int(total)} g"
+
+        st.write(f"• {item['surovina']} – {hodnota_txt}")
 
 st.divider()
 st.markdown("### Úpravy")
