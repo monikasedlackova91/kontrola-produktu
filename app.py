@@ -286,6 +286,12 @@ with st.container(border=True):
 st.divider()
 st.markdown("### Úpravy")
 
+# smažeme staré změny pro jiný produkt, ať se to nemotá
+st.session_state.changes = {
+    k: v for k, v in st.session_state.changes.items()
+    if v.get("produkt") == clean_value(row[product_col])
+}
+
 # ===== FORMULÁŘ PRO ÚPRAVY =====
 for idx, item in enumerate(slozeni):
     item_key = f"{selected}_{idx}"
@@ -358,7 +364,7 @@ if st.button("💾 Uložit všechny změny", use_container_width=True):
             puvodni_num = None
         else:
             try:
-                puvodni_num = float(puvni_raw)
+                puvodni_num = float(puvodni_raw)
             except Exception:
                 puvodni_num = None
 
@@ -443,9 +449,11 @@ else:
                     opravy_df.at[i, "stav"] = "ZAMÍTNUTO"
                     save_opravy(opravy_df)
                     st.rerun()
-with open(OPRAVY_FILE, "rb") as f:
-    st.download_button(
-        label="📥 Stáhnout opravy.xlsx",
-        data=f,
-        file_name="opravy.xlsx"
-    )
+
+if os.path.exists(OPRAVY_FILE):
+    with open(OPRAVY_FILE, "rb") as f:
+        st.download_button(
+            label="📥 Stáhnout opravy.xlsx",
+            data=f,
+            file_name="opravy.xlsx"
+        )
