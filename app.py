@@ -1,5 +1,6 @@
 import os
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
@@ -92,7 +93,7 @@ def uloz_opravu(jmeno, produkt, typ, surovina, puvodni, nova, poznamka):
     df_old = load_opravy()
 
     new_row = pd.DataFrame([{
-        "datum": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "datum": datetime.now(ZoneInfo("Europe/Prague")).strftime("%Y-%m-%d %H:%M:%S"),
         "jmeno": jmeno,
         "produkt": produkt,
         "typ": typ,
@@ -351,32 +352,26 @@ if st.button("💾 Uložit všechny změny", use_container_width=True):
             continue
 
         nova_val = float(change["nova"])
-
-        if nova_val <= 0:
-            invalid_items.append(change["surovina"])
-            continue
-
         puvodni_raw = change["puvodni"]
-        poznamka_raw = clean_value(change["poznamka"])
 
         if puvodni_raw == "" or pd.isna(puvodni_raw):
             puvodni_num = None
         else:
             try:
-                puvodni_num = float(puvodni_raw)
+                puvodni_num = float(puvni_raw)
             except Exception:
                 puvodni_num = None
 
-        changed = False
-
+        # když původní hodnota chyběla, nová musí být > 0
         if puvodni_num is None:
-            changed = True
-        elif abs(nova_val - puvodni_num) > 0.0001:
-            changed = True
-        elif poznamka_raw:
-            changed = True
+            if nova_val > 0:
+                valid_changes.append(change)
+            else:
+                invalid_items.append(change["surovina"])
+            continue
 
-        if changed:
+        # uložit jen skutečně změněné číslo
+        if abs(nova_val - puvodni_num) > 0.0001:
             valid_changes.append(change)
 
     if invalid_items:
@@ -385,7 +380,7 @@ if st.button("💾 Uložit všechny změny", use_container_width=True):
             + ", ".join(invalid_items)
         )
     elif not valid_changes:
-        st.warning("Nenašla jsem žádné změny k uložení.")
+        st.warning("Nenašla jsem žádné skutečné změny k uložení.")
     else:
         for change in valid_changes:
             uloz_opravu(
@@ -398,7 +393,7 @@ if st.button("💾 Uložit všechny změny", use_container_width=True):
                 poznamka=change["poznamka"]
             )
 
-        st.success("Byly uloženy jen skutečně upravené položky.")
+        st.success("Byly uloženy jen skutečně změněné hodnoty.")
         st.session_state.changes = {}
         st.rerun()
 
@@ -410,30 +405,33 @@ opravy_df = load_opravy()
 if opravy_df.empty:
     st.info("Žádné opravy.")
 else:
-    opravy_sorted = opravy_df.sort_values("datum", ascending=False)
+    opravy_df["stav"] = opravy_df["stav"].astype(str).str.strip()
+    opravy_sorted = opravy_df[opravy_df["stav"] == "NOVÉ"].sort_values("datum", ascending=False)
 
-    for i, row_o in opravy_sorted.iterrows():
-        with st.container(border=True):
-            st.write(f"🕒 {row_o.get('datum', '')}")
-            st.write(f"👤 {row_o.get('jmeno', '')}")
-            st.write(f"🍽️ {row_o.get('produkt', '')}")
-            st.write(f"📂 {row_o.get('typ', '')}")
-            st.write(f"🥗 {row_o.get('surovina', '')}")
+    if opravy_sorted.empty:
+        st.info("Žádné nové opravy.")
+    else:
+        for i, row_o in opravy_sorted.iterrows():
+            with st.container(border=True):
+                st.write(f"🕒 {row_o.get('datum', '')}")
+                st.write(f"👤 {row_o.get('jmeno', '')}")
+                st.write(f"🍽️ {row_o.get('produkt', '')}")
+                st.write(f"📂 {row_o.get('typ', '')}")
+                st.write(f"🥗 {row_o.get('surovina', '')}")
 
-            typ_o = clean_value(row_o.get("typ", ""))
-            jednotka = "ks" if typ_o == "Základ" else "g"
+                typ_o = clean_value(row_o.get("typ", ""))
+                jednotka = "ks" if typ_o == "Základ" else "g"
 
-            st.write(f"**Původní hodnota:** {row_o.get('puvodni_gramaz', '')} {jednotka}")
-            st.write(f"**Nová hodnota:** {row_o.get('nova_gramaz', '')} {jednotka}")
+                st.write(f"**Původní hodnota:** {row_o.get('puvodni_gramaz', '')} {jednotka}")
+                st.write(f"**Nová hodnota:** {row_o.get('nova_gramaz', '')} {jednotka}")
 
-            poznamka_val = row_o.get("poznamka", "")
-            if clean_value(poznamka_val):
-                st.write(f"📝 {poznamka_val}")
+                poznamka_val = row_o.get("poznamka", "")
+                if clean_value(poznamka_val):
+                    st.write(f"📝 {poznamka_val}")
 
-            stav_val = clean_value(row_o.get("stav", ""))
-            st.write(f"📌 Stav: {stav_val}")
+                stav_val = clean_value(row_o.get("stav", ""))
+                st.write(f"📌 Stav: {stav_val}")
 
-            if stav_val == "NOVÉ":
                 col1, col2 = st.columns(2)
 
                 if col1.button("✅ Schválit", key=f"sch_{i}"):
