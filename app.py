@@ -222,27 +222,20 @@ if not product_col:
 df = df[df[product_col].notna()].copy()
 df[product_col] = df[product_col].astype(str).str.strip()
 
-search = st.text_input("Hledat produkt", "", placeholder="např. croissant")
-
-if search.strip():
-    filtered = df[df[product_col].str.contains(search, case=False, na=False)].copy()
-else:
-    filtered = df.copy()
-
-produkty = filtered[product_col].drop_duplicates().sort_values().tolist()
+produkty = df[product_col].drop_duplicates().sort_values().tolist()
 
 selected = st.selectbox(
-    "Vyber produkt",
+    "Produkt (klikni sem a začni psát)",
     produkty,
     index=None,
-    placeholder="Vyber produkt ze seznamu"
+    placeholder="Klikni sem a začni psát název produktu"
 )
 
 if not selected:
     st.info("Nejdřív vyber produkt ze seznamu.")
     st.stop()
 
-product_rows = filtered[filtered[product_col] == selected].copy()
+product_rows = df[df[product_col] == selected].copy()
 
 if product_rows.empty:
     st.warning("Vybraný produkt jsem nenašla.")
@@ -357,9 +350,33 @@ if st.button("💾 Uložit všechny změny", use_container_width=True):
         if change["produkt"] != clean_value(row[product_col]):
             continue
 
-        if float(change["nova"]) <= 0:
+        nova_val = float(change["nova"])
+
+        if nova_val <= 0:
             invalid_items.append(change["surovina"])
+            continue
+
+        puvodni_raw = change["puvodni"]
+        poznamka_raw = clean_value(change["poznamka"])
+
+        if puvodni_raw == "" or pd.isna(puvodni_raw):
+            puvodni_num = None
         else:
+            try:
+                puvodni_num = float(puvodni_raw)
+            except Exception:
+                puvodni_num = None
+
+        changed = False
+
+        if puvodni_num is None:
+            changed = True
+        elif abs(nova_val - puvodni_num) > 0.0001:
+            changed = True
+        elif poznamka_raw:
+            changed = True
+
+        if changed:
             valid_changes.append(change)
 
     if invalid_items:
@@ -381,7 +398,7 @@ if st.button("💾 Uložit všechny změny", use_container_width=True):
                 poznamka=change["poznamka"]
             )
 
-        st.success("Všechny změny byly uloženy.")
+        st.success("Byly uloženy jen skutečně upravené položky.")
         st.session_state.changes = {}
         st.rerun()
 
