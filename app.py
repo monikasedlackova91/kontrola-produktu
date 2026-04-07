@@ -443,3 +443,9 @@ else:
                     opravy_df.at[i, "stav"] = "ZAMÍTNUTO"
                     save_opravy(opravy_df)
                     st.rerun()
+with open(OPRAVY_FILE, "rb") as f:
+    st.download_button(
+        label="📥 Stáhnout opravy.xlsx",
+        data=f,
+        file_name="opravy.xlsx"
+    )
