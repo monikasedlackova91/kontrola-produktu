@@ -1,4 +1,5 @@
 import os
+import shutil
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -9,9 +10,10 @@ st.set_page_config(page_title="Kontrola produktů", layout="centered")
 
 # ===== CESTY K SOUBORŮM =====
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.environ.get("DATA_DIR", ".")
+DATA_DIR = os.environ.get("DATA_DIR", "/data")
 
-EXPORT_FILE = os.path.join(BASE_DIR, "export.xlsx")
+DEFAULT_EXPORT_FILE = os.path.join(BASE_DIR, "export.xlsx")
+EXPORT_FILE = os.path.join(DATA_DIR, "export.xlsx")
 OPRAVY_FILE = os.path.join(DATA_DIR, "opravy.xlsx")
 EXPORT_SHEET = "export"
 
@@ -24,6 +26,23 @@ def clean_value(v):
 
 def ensure_data_dir():
     os.makedirs(DATA_DIR, exist_ok=True)
+
+
+def ensure_export_file():
+    """
+    Pokud ještě v /data není export.xlsx, zkopíruje se tam výchozí export.xlsx
+    z repozitáře (vedle app.py).
+    """
+    ensure_data_dir()
+
+    if not os.path.exists(EXPORT_FILE):
+        if os.path.exists(DEFAULT_EXPORT_FILE):
+            shutil.copy(DEFAULT_EXPORT_FILE, EXPORT_FILE)
+        else:
+            st.error(
+                f"Nenašla jsem export.xlsx ani v {EXPORT_FILE}, ani výchozí soubor v {DEFAULT_EXPORT_FILE}."
+            )
+            st.stop()
 
 
 def ensure_opravy_file():
@@ -45,14 +64,12 @@ def ensure_opravy_file():
 
 
 def load_export():
-    if not os.path.exists(EXPORT_FILE):
-        st.error(f"Soubor {EXPORT_FILE} nebyl nalezen.")
-        st.stop()
+    ensure_export_file()
 
     try:
         df = pd.read_excel(EXPORT_FILE, sheet_name=EXPORT_SHEET, engine="openpyxl")
     except Exception as e:
-        st.error(f"Chyba při načítání Excelu: {e}")
+        st.error(f"Chyba při načítání export.xlsx: {e}")
         st.stop()
 
     df.columns = [str(c).strip() for c in df.columns]
@@ -62,31 +79,23 @@ def load_export():
 def load_opravy():
     ensure_opravy_file()
 
-    if os.path.exists(OPRAVY_FILE):
-        try:
-            df = pd.read_excel(OPRAVY_FILE, engine="openpyxl")
-            df.columns = [str(c).strip() for c in df.columns]
-            return df
-        except Exception as e:
-            st.error(f"Chyba při načítání oprav: {e}")
-            st.stop()
-
-    return pd.DataFrame(columns=[
-        "datum",
-        "jmeno",
-        "produkt",
-        "typ",
-        "surovina",
-        "puvodni_gramaz",
-        "nova_gramaz",
-        "poznamka",
-        "stav"
-    ])
+    try:
+        df = pd.read_excel(OPRAVY_FILE, engine="openpyxl")
+        df.columns = [str(c).strip() for c in df.columns]
+        return df
+    except Exception as e:
+        st.error(f"Chyba při načítání oprav.xlsx: {e}")
+        st.stop()
 
 
 def save_opravy(df):
     ensure_data_dir()
     df.to_excel(OPRAVY_FILE, index=False)
+
+
+def save_export(df):
+    ensure_data_dir()
+    df.to_excel(EXPORT_FILE, sheet_name=EXPORT_SHEET, index=False)
 
 
 def uloz_opravu(jmeno, produkt, typ, surovina, puvodni, nova, poznamka):
@@ -196,8 +205,122 @@ def get_default_numeric_value(value):
         return 0.0
 
 
+def convert_number_for_excel(value):
+    try:
+        num = float(value)
+        if abs(num - round(num)) < 0.000001:
+            return int(round(num))
+        return num
+    except Exception:
+        return value
+
+
+def propsat_opravu_do_exportu(produkt, typ, surovina, nova_hodnota):
+    """
+    Vrací (True, zprava) při úspěchu, jinak (False, chyba).
+    """
+    try:
+        df_export = pd.read_excel(EXPORT_FILE, sheet_name=EXPORT_SHEET, engine="openpyxl")
+    except Exception as e:
+        return False, f"Chyba při načtení export.xlsx: {e}"
+
+    df_export.columns = [str(c).strip() for c in df_export.columns]
+
+    product_col = find_exact_col(df_export.columns, "Název produktu")
+    if not product_col:
+        return False, "V export.xlsx chybí sloupec 'Název produktu'."
+
+    df_export[product_col] = df_export[product_col].astype(str).str.strip()
+
+    matches = df_export.index[df_export[product_col] == str(produkt).strip()].tolist()
+    if not matches:
+        return False, f"Produkt '{produkt}' nebyl v export.xlsx nalezen."
+
+    row_idx = matches[0]
+    cols = list(df_export.columns)
+    nova_hodnota_excel = convert_number_for_excel(nova_hodnota)
+
+    if clean_value(typ) == "Základ":
+        col_zaklad = find_exact_col(cols, "Základ")
+        col_pocet = find_exact_col(cols, "počet kusů pečiva")
+
+        if not col_zaklad:
+            return False, "V export.xlsx chybí sloupec 'Základ'."
+        if not col_pocet:
+            return False, "V export.xlsx chybí sloupec 'počet kusů pečiva'."
+
+        export_surovina = clean_value(df_export.at[row_idx, col_zaklad])
+        if export_surovina != clean_value(surovina):
+            return False, (
+                f"U produktu '{produkt}' nesedí základ. "
+                f"V exportu je '{export_surovina}', ale oprava je pro '{surovina}'."
+            )
+
+        df_export.at[row_idx, col_pocet] = nova_hodnota_excel
+
+    elif clean_value(typ) == "Mazání":
+        col_mazani = find_exact_col(cols, "mazání")
+        col_hm_mazani = find_startswith_col(cols, "hmotnost suroviny")
+
+        if not col_mazani:
+            return False, "V export.xlsx chybí sloupec 'mazání'."
+        if not col_hm_mazani:
+            return False, "V export.xlsx chybí sloupec začínající na 'hmotnost suroviny'."
+
+        export_surovina = clean_value(df_export.at[row_idx, col_mazani])
+        if export_surovina != clean_value(surovina):
+            return False, (
+                f"U produktu '{produkt}' nesedí mazání. "
+                f"V exportu je '{export_surovina}', ale oprava je pro '{surovina}'."
+            )
+
+        df_export.at[row_idx, col_hm_mazani] = nova_hodnota_excel
+
+    elif clean_value(typ) == "Složení":
+        found = False
+
+        for i in range(1, 19):
+            col_slozeni = find_exact_col(cols, f"složení {i}")
+            if not col_slozeni:
+                col_slozeni = find_exact_col(cols, f"slozeni {i}")
+
+            if not col_slozeni:
+                continue
+
+            export_surovina = clean_value(df_export.at[row_idx, col_slozeni])
+
+            if export_surovina == clean_value(surovina):
+                col_hmotnost = None
+                for c in cols:
+                    c_text = str(c).strip().lower()
+                    if c_text.startswith(f"hmotnost {i}"):
+                        col_hmotnost = c
+                        break
+
+                if not col_hmotnost:
+                    return False, f"Nenašla jsem sloupec pro 'hmotnost {i}' u suroviny '{surovina}'."
+
+                df_export.at[row_idx, col_hmotnost] = nova_hodnota_excel
+                found = True
+                break
+
+        if not found:
+            return False, f"U produktu '{produkt}' jsem nenašla ve složení surovinu '{surovina}'."
+
+    else:
+        return False, f"Neznámý typ položky: '{typ}'."
+
+    try:
+        save_export(df_export)
+    except Exception as e:
+        return False, f"Chyba při ukládání export.xlsx: {e}"
+
+    return True, f"Oprava byla propsána do export.xlsx pro produkt '{produkt}'."
+
+
 # ===== START APPKY =====
 ensure_data_dir()
+ensure_export_file()
 ensure_opravy_file()
 
 if "changes" not in st.session_state:
@@ -258,7 +381,6 @@ if not slozeni:
     st.warning("U produktu jsem nenašla žádné složení.")
     st.stop()
 
-# ===== RYCHLÝ PŘEHLED =====
 with st.container(border=True):
     st.markdown("### 🧾 Co potřebujeme")
     st.markdown(f"**{clean_value(row[product_col])} ({pocet_kusu} ks)**")
@@ -286,13 +408,11 @@ with st.container(border=True):
 st.divider()
 st.markdown("### Úpravy")
 
-# smažeme staré změny pro jiný produkt, ať se to nemotá
 st.session_state.changes = {
     k: v for k, v in st.session_state.changes.items()
     if v.get("produkt") == clean_value(row[product_col])
 }
 
-# ===== FORMULÁŘ PRO ÚPRAVY =====
 for idx, item in enumerate(slozeni):
     item_key = f"{selected}_{idx}"
 
@@ -368,7 +488,6 @@ if st.button("💾 Uložit všechny změny", use_container_width=True):
             except Exception:
                 puvodni_num = None
 
-        # když původní hodnota chyběla, nová musí být > 0
         if puvodni_num is None:
             if nova_val > 0:
                 valid_changes.append(change)
@@ -376,15 +495,11 @@ if st.button("💾 Uložit všechny změny", use_container_width=True):
                 invalid_items.append(change["surovina"])
             continue
 
-        # uložit jen skutečně změněné číslo
         if abs(nova_val - puvodni_num) > 0.0001:
             valid_changes.append(change)
 
     if invalid_items:
-        st.error(
-            "Tyto položky mají hodnotu 0 nebo méně: "
-            + ", ".join(invalid_items)
-        )
+        st.error("Tyto položky mají hodnotu 0 nebo méně: " + ", ".join(invalid_items))
     elif not valid_changes:
         st.warning("Nenašla jsem žádné skutečné změny k uložení.")
     else:
@@ -441,19 +556,45 @@ else:
                 col1, col2 = st.columns(2)
 
                 if col1.button("✅ Schválit", key=f"sch_{i}"):
-                    opravy_df.at[i, "stav"] = "SCHVÁLENO"
-                    save_opravy(opravy_df)
-                    st.rerun()
+                    ok, msg = propsat_opravu_do_exportu(
+                        produkt=row_o.get("produkt", ""),
+                        typ=row_o.get("typ", ""),
+                        surovina=row_o.get("surovina", ""),
+                        nova_hodnota=row_o.get("nova_gramaz", "")
+                    )
+
+                    if ok:
+                        opravy_df.at[i, "stav"] = "SCHVÁLENO"
+                        save_opravy(opravy_df)
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
 
                 if col2.button("❌ Zamítnout", key=f"zam_{i}"):
                     opravy_df.at[i, "stav"] = "ZAMÍTNUTO"
                     save_opravy(opravy_df)
                     st.rerun()
 
+st.divider()
+st.subheader("Stažení souborů")
+
+col_a, col_b = st.columns(2)
+
 if os.path.exists(OPRAVY_FILE):
     with open(OPRAVY_FILE, "rb") as f:
-        st.download_button(
+        col_a.download_button(
             label="📥 Stáhnout opravy.xlsx",
             data=f,
-            file_name="opravy.xlsx"
+            file_name="opravy.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+if os.path.exists(EXPORT_FILE):
+    with open(EXPORT_FILE, "rb") as f:
+        col_b.download_button(
+            label="📥 Stáhnout export.xlsx",
+            data=f,
+            file_name="export.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
