@@ -74,7 +74,7 @@ def load_df() -> pd.DataFrame:
 
     df = df[COLUMNS].copy()
 
-    # přepíše soubor do správné struktury, pokud byl starý nebo rozbitý
+    # srovná strukturu souboru, pokud byl starší nebo rozbitý
     save_df(df)
 
     for col in ["firma", "adresa", "telefon", "poznamka", "stav", "ridic", "vytvoril"]:
@@ -137,3 +137,21 @@ def mark_done(df: pd.DataFrame, row_id: int, ridic: str = "řidič"):
     df.at[i, "datum_vyzvednuti"] = pd.Timestamp(today_prague())
     df.at[i, "updated_at"] = ts
     return df
+
+
+def reopen_task(df: pd.DataFrame, row_id: int):
+    idx = df.index[df["id"] == row_id]
+    if len(idx) == 0:
+        return df
+
+    i = idx[0]
+    ts = now_prague().strftime("%Y-%m-%d %H:%M:%S")
+    df.at[i, "stav"] = "čeká na vyzvednutí"
+    df.at[i, "ridic"] = ""
+    df.at[i, "datum_vyzvednuti"] = pd.NaT
+    df.at[i, "updated_at"] = ts
+    return df
+
+
+def delete_task(df: pd.DataFrame, row_id: int):
+    return df[df["id"] != row_id].copy()
