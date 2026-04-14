@@ -134,6 +134,6 @@ def mark_done(df: pd.DataFrame, row_id: int, ridic: str = "řidič"):
     ts = now_prague().strftime("%Y-%m-%d %H:%M:%S")
     df.at[i, "stav"] = DONE_STATUS
     df.at[i, "ridic"] = clean(ridic)
-    df.at[i, "datum_vyzvednuti"] = today_prague()
+    df.at[i, "datum_vyzvednuti"] = pd.Timestamp(today_prague())
     df.at[i, "updated_at"] = ts
     return df
