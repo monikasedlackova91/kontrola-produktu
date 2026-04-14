@@ -1,11 +1,10 @@
 import os
-from datetime import datetime, date
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 
 APP_TZ = ZoneInfo("Europe/Prague")
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 
 BEDNY_FILE = os.path.join(DATA_DIR, "bedny_vyzvednuti.xlsx")
@@ -63,6 +62,7 @@ def ensure_file():
 
 def load_df() -> pd.DataFrame:
     ensure_file()
+
     try:
         df = pd.read_excel(BEDNY_FILE, sheet_name=SHEET_NAME)
     except Exception:
@@ -74,8 +74,11 @@ def load_df() -> pd.DataFrame:
 
     df = df[COLUMNS].copy()
 
+    # přepíše soubor do správné struktury, pokud byl starý nebo rozbitý
+    save_df(df)
+
     for col in ["firma", "adresa", "telefon", "poznamka", "stav", "ridic", "vytvoril"]:
-        df[col] = df[col].apply(clean)
+        df[col] = df[col].astype(str).str.strip()
 
     for col in ["datum_rozvozu", "datum_vyzvednuti"]:
         df[col] = pd.to_datetime(df[col], errors="coerce").dt.date
