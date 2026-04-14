@@ -14,7 +14,7 @@ from utils.bedny_lib import (
 
 st.set_page_config(page_title="Bedny - kuchyně", layout="wide")
 
-VEDOUCI = ["Tomáš", "Monika", "Ondra", "Lenka", "Mája", "Iveta", "Eva", "Anička", "Host"]
+VEDOUCI = ["", "Monika", "Ondra", "Lenka", "Mája", "Iveta", "Eva", "Anička", "Host"]
 STATUSES = ["čeká na vyzvednutí", "naplánováno", "volat předem"]
 
 st.title("📦 Evidence beden k vyzvednutí")
@@ -22,7 +22,6 @@ st.caption("Sem vedoucí kuchyně zapisuje zákazníky, kde jsou bedny k vrácen
 
 df = load_df()
 
-# Přehled nahoře
 open_df = df[df["stav"].apply(is_open_status)].copy()
 done_df = df[df["stav"] == "vyzvednuto"].copy()
 
@@ -44,6 +43,7 @@ with st.form("novy_zaznam", clear_on_submit=True):
 
     with col2:
         datum_rozvozu = st.date_input("Datum rozvozu *", value=today_prague(), format="DD.MM.YYYY")
+        pocet_beden = st.number_input("Počet beden k vrácení", min_value=0, step=1, value=0)
         stav = st.selectbox("Stav", STATUSES)
         poznamka = st.text_area("Poznámka", placeholder="např. 4 bedny, volat předem, recepce")
 
@@ -53,7 +53,7 @@ if ulozit:
     if not str(firma).strip() or not str(adresa).strip():
         st.error("Firma a adresa jsou povinné.")
     else:
-        df = add_task(df, firma, adresa, telefon, datum_rozvozu, poznamka, stav, vytvoril)
+        df = add_task(df, firma, adresa, telefon, datum_rozvozu, poznamka, stav, vytvoril, pocet_beden)
         save_df(df)
         st.success("Záznam uložen.")
         st.rerun()
@@ -68,7 +68,9 @@ if active_df.empty:
 else:
     show = active_df.copy()
     show["datum_rozvozu"] = show["datum_rozvozu"].apply(format_date_cz)
-    show = show[["id", "firma", "adresa", "telefon", "datum_rozvozu", "poznamka", "stav", "vytvoril"]]
+    show = show[
+        ["id", "firma", "adresa", "telefon", "datum_rozvozu", "pocet_beden", "poznamka", "stav", "vytvoril"]
+    ]
     st.dataframe(show, use_container_width=True, hide_index=True)
 
 st.divider()
@@ -80,8 +82,25 @@ else:
     show_all = df.copy()
     show_all["datum_rozvozu"] = show_all["datum_rozvozu"].apply(format_date_cz)
     show_all["datum_vyzvednuti"] = show_all["datum_vyzvednuti"].apply(format_date_cz)
+
+    show_all["rozdil"] = show_all["pocet_beden"].fillna(0).astype(int) - show_all["vraceno_beden"].fillna(0).astype(int)
+
     show_all = show_all[
-        ["id", "firma", "adresa", "telefon", "datum_rozvozu", "poznamka", "stav", "ridic", "datum_vyzvednuti", "vytvoril"]
+        [
+            "id",
+            "firma",
+            "adresa",
+            "telefon",
+            "datum_rozvozu",
+            "pocet_beden",
+            "vraceno_beden",
+            "rozdil",
+            "poznamka",
+            "stav",
+            "ridic",
+            "datum_vyzvednuti",
+            "vytvoril",
+        ]
     ]
     st.dataframe(show_all, use_container_width=True, hide_index=True)
 
