@@ -331,7 +331,7 @@ st.write("Vyber produkt → uprav hodnoty → klikni uložit vše")
 
 jmeno = st.selectbox(
     "Kdo upravuje",
-    ["Monika", "Ondra", "Lenka", "Mája", "Iveta", "Eva", "Anička", "Host"]
+    ["Monika", "Ondra", "Lenka", "Mája", "Iveta", "Tomáš", "Eva", "Anička", "Host"]
 )
 
 df = load_export()
