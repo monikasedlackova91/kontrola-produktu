@@ -30,7 +30,7 @@ div.stButton > button {
 """, unsafe_allow_html=True)
 
 st.title("🚚 Bedny k vyzvednutí")
-st.caption("Klikni jen na zákazníka, kde jsi bedny opravdu vyzvedl.")
+st.caption("Zadej reálně vrácený počet beden a pak klikni na vyzvednuto.")
 
 df = load_df()
 
@@ -38,19 +38,13 @@ open_df = df[df["stav"].apply(is_open_status)].copy()
 
 if not open_df.empty:
     open_df["datum_rozvozu_dt"] = pd.to_datetime(open_df["datum_rozvozu"], errors="coerce").dt.date
-
-    # po termínu až když je datum rozvozu starší než včerejšek
     open_df["po_terminu"] = open_df["datum_rozvozu_dt"].apply(
         lambda d: d < (today_prague() - timedelta(days=1)) if pd.notna(d) else False
     )
-
-    # dnešní / včerejší / starší
     open_df["seradit_1"] = open_df["po_terminu"].apply(lambda x: 0 if x else 1)
     open_df["seradit_2"] = open_df["datum_rozvozu_dt"]
-
     open_df = open_df.sort_values(by=["seradit_1", "seradit_2", "firma"], na_position="last")
 
-# Počítadla
 if open_df.empty:
     overdue_count = 0
 else:
@@ -77,16 +71,25 @@ else:
             st.write(f"**Adresa:** {row['adresa']}")
             st.write(f"**Telefon:** {row['telefon'] or '—'}")
             st.write(f"**Rozvoz:** {format_date_cz(row['datum_rozvozu'])}")
+            st.write(f"**Má se vrátit:** {int(row['pocet_beden'])} beden")
 
             if str(row["poznamka"]).strip():
                 st.write(f"**Poznámka:** {row['poznamka']}")
+
+            vraceno = st.number_input(
+                f"Reálně vráceno beden — {row['firma']}",
+                min_value=0,
+                step=1,
+                value=int(row["pocet_beden"]) if pd.notna(row["pocet_beden"]) else 0,
+                key=f"vraceno_{int(row['id'])}",
+            )
 
             if st.button(
                 "✅ VYZVEDNUTO",
                 key=f"done_{int(row['id'])}",
                 use_container_width=True
             ):
-                df = mark_done(df, int(row["id"]), "řidič")
+                df = mark_done(df, int(row["id"]), "řidič", vraceno)
                 save_df(df)
-                st.success(f"Hotovo: {row['firma']}")
+                st.success(f"Hotovo: {row['firma']} — vráceno {vraceno} beden")
                 st.rerun()
