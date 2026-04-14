@@ -14,7 +14,7 @@ from utils.bedny_lib import (
 
 st.set_page_config(page_title="Bedny - kuchyně", layout="wide")
 
-VEDOUCI = ["", "Monika", "Ondra", "Lenka", "Mája", "Iveta", "Eva", "Anička", "Host"]
+VEDOUCI = ["Tomáš", "Monika", "Ondra", "Lenka", "Mája", "Iveta", "Eva", "Anička", "Host"]
 STATUSES = ["čeká na vyzvednutí", "naplánováno", "volat předem"]
 
 st.title("📦 Evidence beden k vyzvednutí")
