@@ -17,6 +17,8 @@ COLUMNS = [
     "telefon",
     "datum_rozvozu",
     "poznamka",
+    "pocet_beden",
+    "vraceno_beden",
     "stav",
     "ridic",
     "datum_vyzvednuti",
@@ -41,6 +43,15 @@ def clean(v):
     if pd.isna(v):
         return ""
     return str(v).strip()
+
+
+def clean_int(v, default=0):
+    try:
+        if pd.isna(v) or v == "":
+            return default
+        return int(float(v))
+    except Exception:
+        return default
 
 
 def ensure_data_dir():
@@ -74,15 +85,16 @@ def load_df() -> pd.DataFrame:
 
     df = df[COLUMNS].copy()
 
-    # srovná strukturu souboru, pokud byl starší nebo rozbitý
-    save_df(df)
-
     for col in ["firma", "adresa", "telefon", "poznamka", "stav", "ridic", "vytvoril"]:
         df[col] = df[col].astype(str).str.strip()
+
+    for col in ["pocet_beden", "vraceno_beden"]:
+        df[col] = df[col].apply(clean_int)
 
     for col in ["datum_rozvozu", "datum_vyzvednuti"]:
         df[col] = pd.to_datetime(df[col], errors="coerce").dt.date
 
+    save_df(df)
     return df
 
 
@@ -106,8 +118,10 @@ def is_open_status(status: str) -> bool:
     return clean(status).lower() in [s.lower() for s in OPEN_STATUSES]
 
 
-def add_task(df: pd.DataFrame, firma, adresa, telefon, datum_rozvozu, poznamka, stav, vytvoril):
+def add_task(df: pd.DataFrame, firma, adresa, telefon, datum_rozvozu, poznamka, stav, vytvoril, pocet_beden):
     ts = now_prague().strftime("%Y-%m-%d %H:%M:%S")
+    pocet = clean_int(pocet_beden, 0)
+
     new_row = {
         "id": next_id(df),
         "firma": clean(firma),
@@ -115,6 +129,8 @@ def add_task(df: pd.DataFrame, firma, adresa, telefon, datum_rozvozu, poznamka, 
         "telefon": clean(telefon),
         "datum_rozvozu": datum_rozvozu,
         "poznamka": clean(poznamka),
+        "pocet_beden": pocet,
+        "vraceno_beden": 0,
         "stav": clean(stav),
         "ridic": "",
         "datum_vyzvednuti": pd.NaT,
@@ -125,7 +141,7 @@ def add_task(df: pd.DataFrame, firma, adresa, telefon, datum_rozvozu, poznamka, 
     return pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
 
 
-def mark_done(df: pd.DataFrame, row_id: int, ridic: str = "řidič"):
+def mark_done(df: pd.DataFrame, row_id: int, ridic: str = "řidič", vraceno_beden: int = 0):
     idx = df.index[df["id"] == row_id]
     if len(idx) == 0:
         return df
@@ -134,6 +150,7 @@ def mark_done(df: pd.DataFrame, row_id: int, ridic: str = "řidič"):
     ts = now_prague().strftime("%Y-%m-%d %H:%M:%S")
     df.at[i, "stav"] = DONE_STATUS
     df.at[i, "ridic"] = clean(ridic)
+    df.at[i, "vraceno_beden"] = clean_int(vraceno_beden, 0)
     df.at[i, "datum_vyzvednuti"] = pd.Timestamp(today_prague())
     df.at[i, "updated_at"] = ts
     return df
@@ -148,6 +165,7 @@ def reopen_task(df: pd.DataFrame, row_id: int):
     ts = now_prague().strftime("%Y-%m-%d %H:%M:%S")
     df.at[i, "stav"] = "čeká na vyzvednutí"
     df.at[i, "ridic"] = ""
+    df.at[i, "vraceno_beden"] = 0
     df.at[i, "datum_vyzvednuti"] = pd.NaT
     df.at[i, "updated_at"] = ts
     return df
