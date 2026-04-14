@@ -8,17 +8,30 @@ from utils.bedny_lib import (
     is_open_status,
     format_date_cz,
     today_prague,
+    reopen_task,
+    delete_task,
 )
 
 st.set_page_config(page_title="Bedny - kuchyně", layout="wide")
 
-VEDOUCI = ["", "Monika", "Ondra", "Lenka", "Mája", "Iveta", "Eva", "Anička", "Host"]
+VEDOUCI = ["Tomáš", "Monika", "Ondra", "Lenka", "Mája", "Iveta", "Eva", "Anička", "Host"]
 STATUSES = ["čeká na vyzvednutí", "naplánováno", "volat předem"]
 
 st.title("📦 Evidence beden k vyzvednutí")
 st.caption("Sem vedoucí kuchyně zapisuje zákazníky, kde jsou bedny k vrácení.")
 
 df = load_df()
+
+# Přehled nahoře
+open_df = df[df["stav"].apply(is_open_status)].copy()
+done_df = df[df["stav"] == "vyzvednuto"].copy()
+
+a, b, c = st.columns(3)
+a.metric("Otevřené", len(open_df))
+b.metric("Vyzvednuto", len(done_df))
+c.metric("Celkem", len(df))
+
+st.divider()
 
 with st.form("novy_zaznam", clear_on_submit=True):
     col1, col2 = st.columns(2)
@@ -71,3 +84,28 @@ else:
         ["id", "firma", "adresa", "telefon", "datum_rozvozu", "poznamka", "stav", "ridic", "datum_vyzvednuti", "vytvoril"]
     ]
     st.dataframe(show_all, use_container_width=True, hide_index=True)
+
+st.divider()
+st.subheader("Opravy záznamů")
+
+if df.empty:
+    st.info("Není co upravovat.")
+else:
+    ids = [int(x) for x in pd.to_numeric(df["id"], errors="coerce").dropna().tolist()]
+    vybrane_id = st.selectbox("Vyber ID záznamu", ids)
+
+    col_a, col_b = st.columns(2)
+
+    with col_a:
+        if st.button("Vrátit na čeká na vyzvednutí", use_container_width=True):
+            df = reopen_task(df, vybrane_id)
+            save_df(df)
+            st.success("Záznam vrácen zpět mezi otevřené.")
+            st.rerun()
+
+    with col_b:
+        if st.button("Smazat záznam", use_container_width=True):
+            df = delete_task(df, vybrane_id)
+            save_df(df)
+            st.success("Záznam smazán.")
+            st.rerun()
