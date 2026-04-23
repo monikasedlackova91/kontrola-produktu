@@ -17,7 +17,12 @@ RECEPTY_FILE = os.path.join(DATA_DIR, "recepty.xlsx")
 EXPORT_SHEET = "export"
 
 
-# ===== POMOCNÉ FUNKCE =====
+def clean_value(v):
+    if pd.isna(v):
+        return ""
+    return str(v).strip()
+
+
 def ensure_data_dir():
     os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -35,13 +40,23 @@ def ensure_export_file():
 def ensure_recepty_file():
     ensure_data_dir()
 
+    required_columns = [
+        "nazev",
+        "typ",
+        "recept",
+        "updated_at",
+        "updated_by"
+    ]
+
     if not os.path.exists(RECEPTY_FILE):
-        df = pd.DataFrame(columns=[
-            "produkt",
-            "recept",
-            "updated_at",
-            "updated_by"
-        ])
+        df = pd.DataFrame(columns=required_columns)
+        df.to_excel(RECEPTY_FILE, index=False)
+    else:
+        df = pd.read_excel(RECEPTY_FILE, engine="openpyxl")
+        df.columns = [str(c).strip() for c in df.columns]
+        for col in required_columns:
+            if col not in df.columns:
+                df[col] = ""
         df.to_excel(RECEPTY_FILE, index=False)
 
 
@@ -80,20 +95,19 @@ def find_exact_col(columns, wanted_name):
     return None
 
 
-def clean_value(v):
-    if pd.isna(v):
-        return ""
-    return str(v).strip()
-
-
-def get_recept_for_product(produkt):
+def get_recept(nazev, typ):
     df = load_recepty()
 
     if df.empty:
         return "", "", ""
 
-    df["produkt"] = df["produkt"].astype(str).str.strip()
-    match = df[df["produkt"] == str(produkt).strip()]
+    df["nazev"] = df["nazev"].astype(str).str.strip()
+    df["typ"] = df["typ"].astype(str).str.strip().str.lower()
+
+    match = df[
+        (df["nazev"] == str(nazev).strip()) &
+        (df["typ"] == str(typ).strip().lower())
+    ]
 
     if match.empty:
         return "", "", ""
@@ -106,23 +120,29 @@ def get_recept_for_product(produkt):
     )
 
 
-def uloz_recept(produkt, recept, jmeno):
+def uloz_recept(nazev, typ, recept, jmeno):
     df = load_recepty()
 
     if df.empty:
         df = pd.DataFrame(columns=[
-            "produkt",
+            "nazev",
+            "typ",
             "recept",
             "updated_at",
             "updated_by"
         ])
 
-    df["produkt"] = df["produkt"].astype(str).str.strip()
+    df["nazev"] = df["nazev"].astype(str).str.strip()
+    df["typ"] = df["typ"].astype(str).str.strip().str.lower()
 
-    produkt_clean = str(produkt).strip()
+    nazev_clean = str(nazev).strip()
+    typ_clean = str(typ).strip().lower()
     now_str = datetime.now(ZoneInfo("Europe/Prague")).strftime("%Y-%m-%d %H:%M:%S")
 
-    matches = df.index[df["produkt"] == produkt_clean].tolist()
+    matches = df.index[
+        (df["nazev"] == nazev_clean) &
+        (df["typ"] == typ_clean)
+    ].tolist()
 
     if matches:
         row_idx = matches[0]
@@ -131,7 +151,8 @@ def uloz_recept(produkt, recept, jmeno):
         df.at[row_idx, "updated_by"] = jmeno
     else:
         new_row = pd.DataFrame([{
-            "produkt": produkt_clean,
+            "nazev": nazev_clean,
+            "typ": typ_clean,
             "recept": recept,
             "updated_at": now_str,
             "updated_by": jmeno
@@ -147,7 +168,7 @@ ensure_export_file()
 ensure_recepty_file()
 
 st.title("Recepty")
-st.write("Vyber produkt a dopiš nebo uprav recept.")
+st.write("Vyber produkt z exportu nebo napiš vlastní recept / komponent.")
 
 jmeno = st.selectbox(
     "Kdo upravuje",
@@ -155,33 +176,57 @@ jmeno = st.selectbox(
 )
 
 df_export = load_export()
-
 product_col = find_exact_col(df_export.columns, "Název produktu")
-if not product_col:
-    st.error("Nenašla jsem sloupec 'Název produktu' v export.xlsx.")
-    st.write(df_export.columns.tolist())
-    st.stop()
 
-df_export = df_export[df_export[product_col].notna()].copy()
-df_export[product_col] = df_export[product_col].astype(str).str.strip()
+produkty = []
+if product_col:
+    df_export = df_export[df_export[product_col].notna()].copy()
+    df_export[product_col] = df_export[product_col].astype(str).str.strip()
+    produkty = sorted(df_export[product_col].drop_duplicates().tolist())
 
-produkty = sorted(df_export[product_col].drop_duplicates().tolist())
-
-selected = st.selectbox(
-    "Produkt",
-    produkty,
-    index=None,
-    placeholder="Klikni sem a začni psát název produktu"
+recept_mode = st.radio(
+    "Co chceš upravit?",
+    ["Produkt z exportu", "Vlastní recept / komponent"],
+    index=0
 )
 
-if not selected:
-    st.info("Nejdřív vyber produkt.")
-    st.stop()
+nazev = ""
+typ = ""
 
-recept, updated_at, updated_by = get_recept_for_product(selected)
+if recept_mode == "Produkt z exportu":
+    selected = st.selectbox(
+        "Produkt",
+        produkty,
+        index=None,
+        placeholder="Klikni sem a začni psát název produktu"
+    )
+
+    if not selected:
+        st.info("Nejdřív vyber produkt.")
+        st.stop()
+
+    nazev = selected
+    typ = "produkt"
+
+else:
+    vlastni_nazev = st.text_input(
+        "Název receptu / komponentu",
+        placeholder="např. lemon curd, malinové želé, tvarohový krém"
+    )
+
+    if clean_value(vlastni_nazev) == "":
+        st.info("Zadej název receptu nebo komponentu.")
+        st.stop()
+
+    nazev = clean_value(vlastni_nazev)
+    typ = "komponent"
+
+recept, updated_at, updated_by = get_recept(nazev, typ)
 
 with st.container(border=True):
-    st.subheader(selected)
+    st.subheader(nazev)
+
+    st.caption(f"Typ: {typ}")
 
     if recept:
         st.caption(f"Naposledy upravil: {updated_by} | {updated_at}")
@@ -199,7 +244,7 @@ with st.container(border=True):
         if clean_value(recept_text) == "":
             st.error("Recept je prázdný.")
         else:
-            uloz_recept(selected, recept_text, jmeno)
+            uloz_recept(nazev, typ, recept_text, jmeno)
             st.success("Recept byl uložen.")
             st.rerun()
 
