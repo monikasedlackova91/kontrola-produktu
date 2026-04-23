@@ -52,12 +52,16 @@ def ensure_recepty_file():
         df = pd.DataFrame(columns=required_columns)
         df.to_excel(RECEPTY_FILE, index=False)
     else:
-        df = pd.read_excel(RECEPTY_FILE, engine="openpyxl")
-        df.columns = [str(c).strip() for c in df.columns]
-        for col in required_columns:
-            if col not in df.columns:
-                df[col] = ""
-        df.to_excel(RECEPTY_FILE, index=False)
+        try:
+            df = pd.read_excel(RECEPTY_FILE, engine="openpyxl")
+            df.columns = [str(c).strip() for c in df.columns]
+            for col in required_columns:
+                if col not in df.columns:
+                    df[col] = ""
+            df.to_excel(RECEPTY_FILE, index=False)
+        except Exception as e:
+            st.error(f"Chyba při kontrole recepty.xlsx: {e}")
+            st.stop()
 
 
 def load_export():
@@ -168,14 +172,17 @@ ensure_export_file()
 ensure_recepty_file()
 
 st.title("Recepty")
-st.write("Vyber produkt z exportu nebo napiš vlastní recept / komponent.")
+st.write("Vyber produkt, založ nový komponent nebo otevři už uložený recept.")
 
 jmeno = st.selectbox(
     "Kdo upravuje",
     ["Monika", "Ondra", "Lenka", "Mája", "Iveta", "Tomáš", "Eva", "Anička", "Host"]
 )
 
+# ===== DATA =====
 df_export = load_export()
+df_recepty = load_recepty()
+
 product_col = find_exact_col(df_export.columns, "Název produktu")
 
 produkty = []
@@ -184,9 +191,24 @@ if product_col:
     df_export[product_col] = df_export[product_col].astype(str).str.strip()
     produkty = sorted(df_export[product_col].drop_duplicates().tolist())
 
+ulozene_recepty = []
+if not df_recepty.empty:
+    df_recepty["nazev"] = df_recepty["nazev"].astype(str).str.strip()
+    df_recepty["typ"] = df_recepty["typ"].astype(str).str.strip().str.lower()
+    df_recepty["zobrazeni"] = df_recepty.apply(
+        lambda r: f"{clean_value(r['nazev'])} ({clean_value(r['typ'])})",
+        axis=1
+    )
+    ulozene_recepty = sorted(df_recepty["zobrazeni"].drop_duplicates().tolist())
+
+# ===== REŽIM =====
 recept_mode = st.radio(
-    "Co chceš upravit?",
-    ["Produkt z exportu", "Vlastní recept / komponent"],
+    "Co chceš udělat?",
+    [
+        "Produkt z exportu",
+        "Nový komponent / vlastní recept",
+        "Zobrazit uložený recept"
+    ],
     index=0
 )
 
@@ -208,7 +230,7 @@ if recept_mode == "Produkt z exportu":
     nazev = selected
     typ = "produkt"
 
-else:
+elif recept_mode == "Nový komponent / vlastní recept":
     vlastni_nazev = st.text_input(
         "Název receptu / komponentu",
         placeholder="např. lemon curd, malinové želé, tvarohový krém"
@@ -221,11 +243,30 @@ else:
     nazev = clean_value(vlastni_nazev)
     typ = "komponent"
 
+else:
+    selected_saved = st.selectbox(
+        "Uložený recept",
+        ulozene_recepty,
+        index=None,
+        placeholder="Vyber už uložený recept"
+    )
+
+    if not selected_saved:
+        st.info("Vyber uložený recept.")
+        st.stop()
+
+    # rozparsování "název (typ)"
+    if selected_saved.endswith(")") and " (" in selected_saved:
+        nazev = selected_saved.rsplit(" (", 1)[0].strip()
+        typ = selected_saved.rsplit(" (", 1)[1].replace(")", "").strip().lower()
+    else:
+        nazev = selected_saved.strip()
+        typ = "komponent"
+
 recept, updated_at, updated_by = get_recept(nazev, typ)
 
 with st.container(border=True):
     st.subheader(nazev)
-
     st.caption(f"Typ: {typ}")
 
     if recept:
