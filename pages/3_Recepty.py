@@ -1,4 +1,5 @@
 import os
+import shutil
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -7,7 +8,9 @@ import streamlit as st
 
 st.set_page_config(page_title="Recepty", layout="centered")
 
-# ===== CESTY =====
+# =========================
+# CESTY
+# =========================
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 
@@ -18,13 +21,24 @@ RECEPTY_FILE = os.path.join(DATA_DIR, "recepty.xlsx")
 RECEPTY_POLOZKY_FILE = os.path.join(DATA_DIR, "recepty_polozky.xlsx")
 
 EXPORT_SHEET = "export"
+APP_TZ = ZoneInfo("Europe/Prague")
+
+USERS = ["Monika", "Ondra", "Lenka", "Mája", "Iveta", "Tomáš", "Eva", "Anička", "Host"]
+TYPY = ["recept", "komponent", "produkt"]
+JEDNOTKY = ["g", "kg", "ml", "l", "ks", "lžíce", "lžička", "špetka", "dle potřeby", ""]
 
 
-# ===== POMOCNÉ FUNKCE =====
+# =========================
+# POMOCNÉ FUNKCE
+# =========================
 def clean_value(v):
     if pd.isna(v):
         return ""
     return str(v).strip()
+
+
+def now_str():
+    return datetime.now(APP_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def ensure_data_dir():
@@ -32,494 +46,467 @@ def ensure_data_dir():
 
 
 def ensure_export_file():
+    ensure_data_dir()
     if not os.path.exists(EXPORT_FILE):
         if os.path.exists(DEFAULT_EXPORT_FILE):
-            import shutil
             shutil.copy(DEFAULT_EXPORT_FILE, EXPORT_FILE)
-        else:
-            st.error("Nenašla jsem export.xlsx.")
-            st.stop()
 
 
-def ensure_recepty_file():
+def ensure_excel_file(path, columns):
     ensure_data_dir()
 
-    cols = ["nazev", "typ", "postup", "poznamka", "updated_at", "updated_by"]
+    if not os.path.exists(path):
+        pd.DataFrame(columns=columns).to_excel(path, index=False)
+        return
 
-    if not os.path.exists(RECEPTY_FILE):
-        pd.DataFrame(columns=cols).to_excel(RECEPTY_FILE, index=False)
-    else:
-        try:
-            df = pd.read_excel(RECEPTY_FILE, engine="openpyxl")
-            df.columns = [str(c).strip() for c in df.columns]
-            for c in cols:
-                if c not in df.columns:
-                    df[c] = ""
-            df.to_excel(RECEPTY_FILE, index=False)
-        except Exception as e:
-            st.error(f"Chyba při kontrole recepty.xlsx: {e}")
-            st.stop()
-
-
-def ensure_recepty_polozky_file():
-    ensure_data_dir()
-
-    cols = ["nazev", "typ", "surovina", "mnozstvi", "jednotka", "popis", "poradi"]
-
-    if not os.path.exists(RECEPTY_POLOZKY_FILE):
-        pd.DataFrame(columns=cols).to_excel(RECEPTY_POLOZKY_FILE, index=False)
-    else:
-        try:
-            df = pd.read_excel(RECEPTY_POLOZKY_FILE, engine="openpyxl")
-            df.columns = [str(c).strip() for c in df.columns]
-            for c in cols:
-                if c not in df.columns:
-                    df[c] = ""
-            df.to_excel(RECEPTY_POLOZKY_FILE, index=False)
-        except Exception as e:
-            st.error(f"Chyba při kontrole recepty_polozky.xlsx: {e}")
-            st.stop()
-
-
-def load_export():
-    ensure_export_file()
     try:
-        df = pd.read_excel(EXPORT_FILE, sheet_name=EXPORT_SHEET, engine="openpyxl")
+        df = pd.read_excel(path, engine="openpyxl")
         df.columns = [str(c).strip() for c in df.columns]
-        return df
+
+        for c in columns:
+            if c not in df.columns:
+                df[c] = ""
+
+        df = df[columns]
+        df.to_excel(path, index=False)
+
     except Exception as e:
-        st.error(f"Chyba při načítání export.xlsx: {e}")
+        st.error(f"Chyba při kontrole souboru {os.path.basename(path)}: {e}")
         st.stop()
+
+
+def ensure_files():
+    ensure_export_file()
+
+    ensure_excel_file(
+        RECEPTY_FILE,
+        ["nazev", "typ", "postup", "poznamka", "created_at", "updated_at", "updated_by"]
+    )
+
+    ensure_excel_file(
+        RECEPTY_POLOZKY_FILE,
+        ["nazev", "typ", "surovina", "mnozstvi", "jednotka", "popis", "poradi"]
+    )
 
 
 def load_recepty():
-    ensure_recepty_file()
-    try:
-        df = pd.read_excel(RECEPTY_FILE, engine="openpyxl")
-        df.columns = [str(c).strip() for c in df.columns]
-        return df
-    except Exception as e:
-        st.error(f"Chyba při načítání recepty.xlsx: {e}")
-        st.stop()
+    df = pd.read_excel(RECEPTY_FILE, engine="openpyxl")
+    df.columns = [str(c).strip() for c in df.columns]
+    return df.fillna("")
 
 
-def load_recepty_polozky():
-    ensure_recepty_polozky_file()
-    try:
-        df = pd.read_excel(RECEPTY_POLOZKY_FILE, engine="openpyxl")
-        df.columns = [str(c).strip() for c in df.columns]
-        return df
-    except Exception as e:
-        st.error(f"Chyba při načítání recepty_polozky.xlsx: {e}")
-        st.stop()
+def load_polozky():
+    df = pd.read_excel(RECEPTY_POLOZKY_FILE, engine="openpyxl")
+    df.columns = [str(c).strip() for c in df.columns]
+    return df.fillna("")
 
 
 def save_recepty(df):
     df.to_excel(RECEPTY_FILE, index=False)
 
 
-def save_recepty_polozky(df):
+def save_polozky(df):
     df.to_excel(RECEPTY_POLOZKY_FILE, index=False)
 
 
-def find_exact_col(columns, wanted_name):
-    for c in columns:
-        if str(c).strip().lower() == wanted_name.strip().lower():
-            return c
-    return None
+def norm_typ(typ):
+    return clean_value(typ).lower()
 
 
-def get_recept_header(nazev, typ):
-    df = load_recepty()
+def recipe_match(df, nazev, typ):
     if df.empty:
-        return "", "", "", ""
+        return pd.Series(dtype=bool)
 
-    df["nazev"] = df["nazev"].astype(str).str.strip()
-    df["typ"] = df["typ"].astype(str).str.strip().str.lower()
-
-    match = df[
-        (df["nazev"] == str(nazev).strip()) &
-        (df["typ"] == str(typ).strip().lower())
-    ]
-
-    if match.empty:
-        return "", "", "", ""
-
-    row = match.iloc[0]
     return (
-        clean_value(row.get("postup", "")),
-        clean_value(row.get("poznamka", "")),
-        clean_value(row.get("updated_at", "")),
-        clean_value(row.get("updated_by", "")),
+        df["nazev"].astype(str).str.strip().str.lower().eq(clean_value(nazev).lower())
+        &
+        df["typ"].astype(str).str.strip().str.lower().eq(norm_typ(typ))
     )
 
 
-def get_recept_items(nazev, typ):
-    df = load_recepty_polozky()
+def get_recipe_header(nazev, typ):
+    df = load_recepty()
+
+    if df.empty:
+        return None
+
+    m = recipe_match(df, nazev, typ)
+    if not m.any():
+        return None
+
+    return df[m].iloc[0].to_dict()
+
+
+def get_recipe_items(nazev, typ):
+    df = load_polozky()
+
     if df.empty:
         return pd.DataFrame(columns=["surovina", "mnozstvi", "jednotka", "popis", "poradi"])
 
-    df["nazev"] = df["nazev"].astype(str).str.strip()
-    df["typ"] = df["typ"].astype(str).str.strip().str.lower()
-
-    out = df[
-        (df["nazev"] == str(nazev).strip()) &
-        (df["typ"] == str(typ).strip().lower())
-    ].copy()
+    m = recipe_match(df, nazev, typ)
+    out = df[m].copy()
 
     if out.empty:
         return pd.DataFrame(columns=["surovina", "mnozstvi", "jednotka", "popis", "poradi"])
 
-    if "poradi" in out.columns:
-        out["poradi_num"] = pd.to_numeric(out["poradi"], errors="coerce").fillna(9999)
-        out = out.sort_values(["poradi_num", "surovina"])
+    out["poradi"] = pd.to_numeric(out["poradi"], errors="coerce").fillna(9999).astype(int)
+    out = out.sort_values(["poradi", "surovina"])
 
-    return out
+    return out[["surovina", "mnozstvi", "jednotka", "popis", "poradi"]].reset_index(drop=True)
 
 
-def uloz_recept_header(nazev, typ, postup, poznamka, jmeno):
+def save_recipe(nazev, typ, postup, poznamka, updated_by, items_df):
+    nazev = clean_value(nazev)
+    typ = norm_typ(typ)
+
+    if not nazev:
+        st.error("Chybí název receptu.")
+        st.stop()
+
+    df_h = load_recepty()
+    m = recipe_match(df_h, nazev, typ)
+    cas = now_str()
+
+    if m.any():
+        idx = df_h[m].index[0]
+        df_h.at[idx, "postup"] = clean_value(postup)
+        df_h.at[idx, "poznamka"] = clean_value(poznamka)
+        df_h.at[idx, "updated_at"] = cas
+        df_h.at[idx, "updated_by"] = clean_value(updated_by)
+    else:
+        new_row = pd.DataFrame([{
+            "nazev": nazev,
+            "typ": typ,
+            "postup": clean_value(postup),
+            "poznamka": clean_value(poznamka),
+            "created_at": cas,
+            "updated_at": cas,
+            "updated_by": clean_value(updated_by),
+        }])
+        df_h = pd.concat([df_h, new_row], ignore_index=True)
+
+    save_recepty(df_h)
+
+    df_i = load_polozky()
+    if not df_i.empty:
+        df_i = df_i[~recipe_match(df_i, nazev, typ)].copy()
+
+    rows = []
+    if items_df is not None and not items_df.empty:
+        tmp = items_df.copy().fillna("")
+
+        for i, r in tmp.iterrows():
+            surovina = clean_value(r.get("surovina", ""))
+            if not surovina:
+                continue
+
+            poradi = r.get("poradi", i + 1)
+            try:
+                poradi = int(float(poradi))
+            except Exception:
+                poradi = i + 1
+
+            rows.append({
+                "nazev": nazev,
+                "typ": typ,
+                "surovina": surovina,
+                "mnozstvi": clean_value(r.get("mnozstvi", "")),
+                "jednotka": clean_value(r.get("jednotka", "")),
+                "popis": clean_value(r.get("popis", "")),
+                "poradi": poradi,
+            })
+
+    if rows:
+        df_i = pd.concat([df_i, pd.DataFrame(rows)], ignore_index=True)
+
+    save_polozky(df_i)
+
+
+def delete_recipe(nazev, typ):
+    df_h = load_recepty()
+    df_i = load_polozky()
+
+    df_h = df_h[~recipe_match(df_h, nazev, typ)].copy()
+    df_i = df_i[~recipe_match(df_i, nazev, typ)].copy()
+
+    save_recepty(df_h)
+    save_polozky(df_i)
+
+
+def list_recipes():
     df = load_recepty()
+
     if df.empty:
-        df = pd.DataFrame(columns=["nazev", "typ", "postup", "poznamka", "updated_at", "updated_by"])
+        return []
 
     df["nazev"] = df["nazev"].astype(str).str.strip()
     df["typ"] = df["typ"].astype(str).str.strip().str.lower()
+    df = df[df["nazev"] != ""].copy()
 
-    nazev_clean = str(nazev).strip()
-    typ_clean = str(typ).strip().lower()
-    now_str = datetime.now(ZoneInfo("Europe/Prague")).strftime("%Y-%m-%d %H:%M:%S")
+    df["label"] = df.apply(lambda r: f"{r['nazev']}  ·  {r['typ']}", axis=1)
 
-    matches = df.index[
-        (df["nazev"] == nazev_clean) &
-        (df["typ"] == typ_clean)
-    ].tolist()
+    return sorted(df["label"].drop_duplicates().tolist())
 
-    if matches:
-        i = matches[0]
-        df.at[i, "postup"] = postup
-        df.at[i, "poznamka"] = poznamka
-        df.at[i, "updated_at"] = now_str
-        df.at[i, "updated_by"] = jmeno
+
+def parse_label(label):
+    if "  ·  " in label:
+        a, b = label.rsplit("  ·  ", 1)
+        return a.strip(), b.strip().lower()
+    return label.strip(), "recept"
+
+
+def display_recipe(nazev, typ):
+    header = get_recipe_header(nazev, typ)
+    items = get_recipe_items(nazev, typ)
+
+    if not header:
+        st.warning("Recept zatím není uložený.")
+        return
+
+    st.markdown(f"## {clean_value(header.get('nazev', nazev))}")
+    st.caption(f"Typ: {clean_value(header.get('typ', typ))}")
+
+    updated_by = clean_value(header.get("updated_by", ""))
+    updated_at = clean_value(header.get("updated_at", ""))
+
+    if updated_by or updated_at:
+        st.caption(f"Naposledy upravil/a: {updated_by} | {updated_at}")
+
+    if clean_value(header.get("poznamka", "")):
+        st.info(clean_value(header.get("poznamka", "")))
+
+    st.markdown("### Suroviny")
+
+    if items.empty:
+        st.write("_Bez vypsaných surovin._")
     else:
-        new_row = pd.DataFrame([{
-            "nazev": nazev_clean,
-            "typ": typ_clean,
-            "postup": postup,
-            "poznamka": poznamka,
-            "updated_at": now_str,
-            "updated_by": jmeno
-        }])
-        df = pd.concat([df, new_row], ignore_index=True)
-
-    save_recepty(df)
-
-
-def uloz_recept_items(nazev, typ, items_df):
-    df_all = load_recepty_polozky()
-
-    if df_all.empty:
-        df_all = pd.DataFrame(columns=["nazev", "typ", "surovina", "mnozstvi", "jednotka", "popis", "poradi"])
-
-    df_all["nazev"] = df_all["nazev"].astype(str).str.strip()
-    df_all["typ"] = df_all["typ"].astype(str).str.strip().str.lower()
-
-    nazev_clean = str(nazev).strip()
-    typ_clean = str(typ).strip().lower()
-
-    df_all = df_all[
-        ~(
-            (df_all["nazev"] == nazev_clean) &
-            (df_all["typ"] == typ_clean)
-        )
-    ].copy()
-
-    if not items_df.empty:
-        items_df = items_df.copy()
-        items_df["nazev"] = nazev_clean
-        items_df["typ"] = typ_clean
-        items_df = items_df[["nazev", "typ", "surovina", "mnozstvi", "jednotka", "popis", "poradi"]]
-        df_all = pd.concat([df_all, items_df], ignore_index=True)
-
-    save_recepty_polozky(df_all)
-
-
-# ===== START =====
-ensure_data_dir()
-ensure_export_file()
-ensure_recepty_file()
-ensure_recepty_polozky_file()
-
-if "recept_new_items" not in st.session_state:
-    st.session_state["recept_new_items"] = []
-
-st.title("Recepty")
-st.write("Recepty a komponenty ve stylu kuchyně.")
-
-jmeno = st.selectbox(
-    "Kdo upravuje",
-    ["Monika", "Ondra", "Lenka", "Mája", "Iveta", "Tomáš", "Eva", "Anička", "Host"]
-)
-
-df_export = load_export()
-product_col = find_exact_col(df_export.columns, "Název produktu")
-
-produkty = []
-if product_col:
-    df_export = df_export[df_export[product_col].notna()].copy()
-    df_export[product_col] = df_export[product_col].astype(str).str.strip()
-    produkty = sorted(df_export[product_col].drop_duplicates().tolist())
-
-df_recepty = load_recepty()
-ulozene = []
-if not df_recepty.empty:
-    df_recepty["nazev"] = df_recepty["nazev"].astype(str).str.strip()
-    df_recepty["typ"] = df_recepty["typ"].astype(str).str.strip().str.lower()
-    df_recepty["zobrazeni"] = df_recepty.apply(
-        lambda r: f"{clean_value(r['nazev'])} ({clean_value(r['typ'])})",
-        axis=1
-    )
-    ulozene = sorted(df_recepty["zobrazeni"].drop_duplicates().tolist())
-
-mode = st.radio(
-    "Co chceš otevřít?",
-    ["Produkt z exportu", "Nový komponent", "Uložený recept"],
-    index=0
-)
-
-nazev = ""
-typ = ""
-
-if mode == "Produkt z exportu":
-    vyber = st.selectbox(
-        "Produkt",
-        produkty,
-        index=None,
-        placeholder="Klikni sem a začni psát název produktu"
-    )
-    if not vyber:
-        st.info("Nejdřív vyber produkt.")
-        st.stop()
-    nazev = vyber
-    typ = "produkt"
-
-elif mode == "Nový komponent":
-    vlastni = st.text_input(
-        "Název komponentu / receptu",
-        placeholder="např. lemon curd, vanilkový krém, malinové želé"
-    )
-    if clean_value(vlastni) == "":
-        st.info("Zadej název komponentu.")
-        st.stop()
-    nazev = clean_value(vlastni)
-    typ = "komponent"
-
-else:
-    vyber_ulozeny = st.selectbox(
-        "Uložený recept",
-        ulozene,
-        index=None,
-        placeholder="Vyber už uložený recept"
-    )
-    if not vyber_ulozeny:
-        st.info("Vyber uložený recept.")
-        st.stop()
-
-    if vyber_ulozeny.endswith(")") and " (" in vyber_ulozeny:
-        nazev = vyber_ulozeny.rsplit(" (", 1)[0].strip()
-        typ = vyber_ulozeny.rsplit(" (", 1)[1].replace(")", "").strip().lower()
-    else:
-        nazev = vyber_ulozeny.strip()
-        typ = "komponent"
-
-postup, poznamka_hlavni, updated_at, updated_by = get_recept_header(nazev, typ)
-items_df = get_recept_items(nazev, typ)
-
-st.subheader(nazev)
-st.caption(f"Typ: {typ}")
-
-if updated_at or updated_by:
-    st.caption(f"Naposledy upravil: {updated_by} | {updated_at}")
-
-st.divider()
-st.markdown("### 🧾 Vypsané suroviny")
-
-if items_df.empty and not st.session_state["recept_new_items"]:
-    st.info("Recept zatím nemá žádné suroviny.")
-else:
-    for idx, r in items_df.reset_index(drop=True).iterrows():
-        with st.container(border=True):
-            st.write(f"**{clean_value(r.get('surovina', ''))}**")
-
-            mnoz = clean_value(r.get("mnozstvi", ""))
-            jed = clean_value(r.get("jednotka", ""))
-            if mnoz or jed:
-                st.write(f"Množství: {mnoz} {jed}".strip())
-
+        for _, r in items.iterrows():
+            surovina = clean_value(r.get("surovina", ""))
+            mnozstvi = clean_value(r.get("mnozstvi", ""))
+            jednotka = clean_value(r.get("jednotka", ""))
             popis = clean_value(r.get("popis", ""))
+
+            line = f"**{surovina}**"
+            if mnozstvi or jednotka:
+                line += f" — {mnozstvi} {jednotka}".strip()
+
+            st.markdown(line)
+
             if popis:
                 st.caption(popis)
 
-    for idx, r in enumerate(st.session_state["recept_new_items"]):
-        with st.container(border=True):
-            st.write(f"**{clean_value(r.get('surovina', ''))}**")
-            mnoz = clean_value(r.get("mnozstvi", ""))
-            jed = clean_value(r.get("jednotka", ""))
-            if mnoz or jed:
-                st.write(f"Množství: {mnoz} {jed}".strip())
-            popis = clean_value(r.get("popis", ""))
-            if popis:
-                st.caption(popis)
-            st.caption("Nová nepřidaná položka")
+    st.markdown("### Postup")
 
+    postup = clean_value(header.get("postup", ""))
+    if postup:
+        st.markdown(postup.replace("\n", "  \n"))
+    else:
+        st.write("_Postup zatím není vyplněný._")
+
+
+# =========================
+# START
+# =========================
+ensure_files()
+
+st.title("Kuchařka / recepty")
+st.caption("Vyhledej recept a kuchyň uvidí jen to, co opravdu potřebuje.")
+
+recepty = list_recipes()
+
+tab1, tab2 = st.tabs(["🔎 Najít recept", "➕ Přidat nový recept"])
+
+
+# =========================
+# TAB 1 — NAJÍT
+# =========================
+with tab1:
+    if not recepty:
+        st.info("Zatím není uložený žádný recept.")
+    else:
+        vyber = st.selectbox(
+            "Vyhledej recept",
+            recepty,
+            index=None,
+            placeholder="Začni psát třeba bábovka, lemon curd, roastbeef..."
+        )
+
+        if vyber:
+            nazev, typ = parse_label(vyber)
+
+            st.divider()
+            display_recipe(nazev, typ)
+
+            st.divider()
+
+            with st.expander("✏️ Upravit tento recept"):
+                header = get_recipe_header(nazev, typ) or {}
+                items = get_recipe_items(nazev, typ)
+
+                with st.form(f"edit_form_{nazev}_{typ}"):
+                    jmeno = st.selectbox("Kdo upravuje", USERS)
+
+                    new_nazev = st.text_input("Název receptu", value=nazev)
+                    new_typ = st.selectbox(
+                        "Typ",
+                        TYPY,
+                        index=TYPY.index(typ) if typ in TYPY else 0
+                    )
+
+                    st.markdown("#### Suroviny")
+
+                    if items.empty:
+                        edit_df = pd.DataFrame(columns=["surovina", "mnozstvi", "jednotka", "popis", "poradi"])
+                    else:
+                        edit_df = items.copy()
+
+                    edited_items = st.data_editor(
+                        edit_df,
+                        use_container_width=True,
+                        num_rows="dynamic",
+                        hide_index=True,
+                        column_config={
+                            "surovina": st.column_config.TextColumn("Surovina", required=True),
+                            "mnozstvi": st.column_config.TextColumn("Množství"),
+                            "jednotka": st.column_config.SelectboxColumn("Jednotka", options=JEDNOTKY),
+                            "popis": st.column_config.TextColumn("Poznámka k surovině"),
+                            "poradi": st.column_config.NumberColumn("Pořadí", min_value=1, step=1),
+                        },
+                        column_order=["poradi", "surovina", "mnozstvi", "jednotka", "popis"],
+                    )
+
+                    st.markdown("#### Postup a poznámky")
+
+                    postup = st.text_area(
+                        "Postup",
+                        value=clean_value(header.get("postup", "")),
+                        height=260,
+                        placeholder="Napiš postup tak, aby podle toho kuchyň opravdu mohla jet..."
+                    )
+
+                    poznamka = st.text_area(
+                        "Obecná poznámka",
+                        value=clean_value(header.get("poznamka", "")),
+                        height=120,
+                        placeholder="Např. péct den předem, krájet až studené, pozor na sražení krému..."
+                    )
+
+                    col_save, col_delete = st.columns(2)
+
+                    save_btn = col_save.form_submit_button("💾 Uložit úpravy", use_container_width=True)
+                    delete_btn = col_delete.form_submit_button("🗑️ Smazat recept", use_container_width=True)
+
+                    if save_btn:
+                        save_recipe(
+                            nazev=new_nazev,
+                            typ=new_typ,
+                            postup=postup,
+                            poznamka=poznamka,
+                            updated_by=jmeno,
+                            items_df=edited_items,
+                        )
+
+                        if clean_value(new_nazev).lower() != clean_value(nazev).lower() or norm_typ(new_typ) != norm_typ(typ):
+                            delete_recipe(nazev, typ)
+
+                        st.success("Recept je uložený.")
+                        st.rerun()
+
+                    if delete_btn:
+                        delete_recipe(nazev, typ)
+                        st.success("Recept byl smazán.")
+                        st.rerun()
+
+
+# =========================
+# TAB 2 — NOVÝ RECEPT
+# =========================
+with tab2:
+    with st.form("new_recipe_form"):
+        jmeno = st.selectbox("Kdo zadává", USERS, key="new_user")
+
+        nazev = st.text_input(
+            "Název receptu",
+            placeholder="např. bábovka, lemon curd, roastbeef, vanilkový krém"
+        )
+
+        typ = st.selectbox("Typ", TYPY, index=0)
+
+        st.markdown("#### Suroviny")
+
+        start_df = pd.DataFrame([
+            {"poradi": 1, "surovina": "", "mnozstvi": "", "jednotka": "g", "popis": ""},
+        ])
+
+        items_new = st.data_editor(
+            start_df,
+            use_container_width=True,
+            num_rows="dynamic",
+            hide_index=True,
+            column_config={
+                "surovina": st.column_config.TextColumn("Surovina", required=True),
+                "mnozstvi": st.column_config.TextColumn("Množství"),
+                "jednotka": st.column_config.SelectboxColumn("Jednotka", options=JEDNOTKY),
+                "popis": st.column_config.TextColumn("Poznámka k surovině"),
+                "poradi": st.column_config.NumberColumn("Pořadí", min_value=1, step=1),
+            },
+            column_order=["poradi", "surovina", "mnozstvi", "jednotka", "popis"],
+        )
+
+        postup = st.text_area(
+            "Postup",
+            height=260,
+            placeholder="1. Připrav...\n2. Smíchej...\n3. Peč..."
+        )
+
+        poznamka = st.text_area(
+            "Obecná poznámka",
+            height=120,
+            placeholder="Např. množství je na 1 plech / 1 dort / 20 porcí..."
+        )
+
+        submitted = st.form_submit_button("💾 Uložit nový recept", use_container_width=True)
+
+        if submitted:
+            if not clean_value(nazev):
+                st.error("Zadej název receptu.")
+            else:
+                save_recipe(
+                    nazev=nazev,
+                    typ=typ,
+                    postup=postup,
+                    poznamka=poznamka,
+                    updated_by=jmeno,
+                    items_df=items_new,
+                )
+                st.success("Nový recept je uložený.")
+                st.rerun()
+
+
+# =========================
+# STAŽENÍ SOUBORŮ
+# =========================
 st.divider()
-st.markdown("### Úpravy surovin receptu")
 
-edit_rows = []
-source_df = items_df.reset_index(drop=True).copy()
+with st.expander("📥 Stáhnout soubory"):
+    col1, col2 = st.columns(2)
 
-if source_df.empty:
-    source_df = pd.DataFrame(columns=["surovina", "mnozstvi", "jednotka", "popis", "poradi"])
+    if os.path.exists(RECEPTY_FILE):
+        with open(RECEPTY_FILE, "rb") as f:
+            col1.download_button(
+                "Stáhnout recepty.xlsx",
+                data=f,
+                file_name="recepty.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
 
-for idx, r in source_df.iterrows():
-    with st.container(border=True):
-        surovina = st.text_input("Surovina", value=clean_value(r.get("surovina", "")), key=f"s_{idx}")
-        mnozstvi = st.text_input("Množství", value=clean_value(r.get("mnozstvi", "")), key=f"m_{idx}")
-
-        current_jednotka = clean_value(r.get("jednotka", ""))
-        jednotky = ["g", "kg", "ml", "l", "ks", ""]
-        if current_jednotka not in jednotky:
-            current_jednotka = ""
-
-        jednotka = st.selectbox(
-            "Jednotka",
-            jednotky,
-            index=jednotky.index(current_jednotka),
-            key=f"j_{idx}"
-        )
-
-        popis = st.text_input("Poznámka / popis", value=clean_value(r.get("popis", "")), key=f"p_{idx}")
-
-        poradi_raw = pd.to_numeric(r.get("poradi", 1), errors="coerce")
-        if pd.isna(poradi_raw) or poradi_raw < 1:
-            poradi_raw = 1
-
-        poradi = st.number_input(
-            "Pořadí",
-            min_value=1,
-            step=1,
-            value=int(poradi_raw),
-            key=f"o_{idx}"
-        )
-
-        if clean_value(surovina) != "":
-            edit_rows.append({
-                "surovina": clean_value(surovina),
-                "mnozstvi": clean_value(mnozstvi),
-                "jednotka": clean_value(jednotka),
-                "popis": clean_value(popis),
-                "poradi": int(poradi)
-            })
-
-with st.container(border=True):
-    st.markdown("**➕ Přidat novou surovinu**")
-    nova_surovina = st.text_input("Název nové suroviny", key="nova_surovina")
-    nove_mnozstvi = st.text_input("Množství", key="nove_mnozstvi")
-    nova_jednotka = st.selectbox("Jednotka", ["g", "kg", "ml", "l", "ks", ""], key="nova_jednotka")
-    novy_popis = st.text_input("Poznámka / popis", key="novy_popis")
-    nove_poradi = st.number_input(
-        "Pořadí nové položky",
-        min_value=1,
-        step=1,
-        value=max(len(edit_rows) + len(st.session_state["recept_new_items"]) + 1, 1),
-        key="nove_poradi"
-    )
-
-    if st.button("Přidat novou surovinu do seznamu", use_container_width=True):
-        if clean_value(nova_surovina) == "":
-            st.error("Zadej název nové suroviny.")
-        else:
-            st.session_state["recept_new_items"].append({
-                "surovina": clean_value(nova_surovina),
-                "mnozstvi": clean_value(nove_mnozstvi),
-                "jednotka": clean_value(nova_jednotka),
-                "popis": clean_value(novy_popis),
-                "poradi": int(nove_poradi)
-            })
-            st.success("Nová surovina přidána. Teď klikni na Uložit celý recept.")
-            st.rerun()
-
-for x in st.session_state["recept_new_items"]:
-    if clean_value(x.get("surovina", "")) != "":
-        edit_rows.append({
-            "surovina": clean_value(x.get("surovina", "")),
-            "mnozstvi": clean_value(x.get("mnozstvi", "")),
-            "jednotka": clean_value(x.get("jednotka", "")),
-            "popis": clean_value(x.get("popis", "")),
-            "poradi": int(x.get("poradi", 1))
-        })
-
-st.divider()
-st.markdown("### Postup a poznámky")
-
-postup_text = st.text_area(
-    "Postup",
-    value=postup,
-    height=220,
-    placeholder="Sem napiš postup receptu..."
-)
-
-hlavni_poznamka_text = st.text_area(
-    "Obecná poznámka",
-    value=poznamka_hlavni,
-    height=120,
-    placeholder="Sem může a nemusí být poznámka / popis..."
-)
-
-if st.button("💾 Uložit celý recept", use_container_width=True):
-    items_save_df = pd.DataFrame(
-        edit_rows,
-        columns=["surovina", "mnozstvi", "jednotka", "popis", "poradi"]
-    )
-
-    uloz_recept_header(
-        nazev=nazev,
-        typ=typ,
-        postup=postup_text,
-        poznamka=hlavni_poznamka_text,
-        jmeno=jmeno
-    )
-
-    uloz_recept_items(
-        nazev=nazev,
-        typ=typ,
-        items_df=items_save_df
-    )
-
-    st.session_state["recept_new_items"] = []
-    st.success("Recept byl uložen.")
-    st.rerun()
-
-st.divider()
-st.subheader("Stažení souborů")
-
-col1, col2 = st.columns(2)
-
-if os.path.exists(RECEPTY_FILE):
-    with open(RECEPTY_FILE, "rb") as f:
-        col1.download_button(
-            label="📥 Stáhnout recepty.xlsx",
-            data=f,
-            file_name="recepty.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
-
-if os.path.exists(RECEPTY_POLOZKY_FILE):
-    with open(RECEPTY_POLOZKY_FILE, "rb") as f:
-        col2.download_button(
-            label="📥 Stáhnout recepty_polozky.xlsx",
-            data=f,
-            file_name="recepty_polozky.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
+    if os.path.exists(RECEPTY_POLOZKY_FILE):
+        with open(RECEPTY_POLOZKY_FILE, "rb") as f:
+            col2.download_button(
+                "Stáhnout recepty_polozky.xlsx",
+                data=f,
+                file_name="recepty_polozky.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
