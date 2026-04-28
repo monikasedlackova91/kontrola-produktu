@@ -11,8 +11,11 @@ from utils.bedny_lib import (
     reopen_task,
     delete_task,
 )
+from auth import check_password
 
 st.set_page_config(page_title="Bedny - kuchyně", layout="wide")
+
+check_password()
 
 VEDOUCI = ["Tomáš", "Monika", "Ondra", "Lenka", "Mája", "Iveta", "Eva", "Anička", "Host"]
 STATUSES = ["čeká na vyzvednutí", "naplánováno", "volat předem"]
