@@ -8,6 +8,9 @@ import streamlit as st
 
 st.set_page_config(page_title="Recepty", layout="centered")
 
+# =========================
+# CESTY
+# =========================
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 
@@ -24,6 +27,9 @@ TYPY = ["recept", "komponent", "produkt"]
 JEDNOTKY = ["g", "kg", "ml", "l", "ks", "lžíce", "lžička", "špetka", "dle potřeby", ""]
 
 
+# =========================
+# POMOCNÉ FUNKCE
+# =========================
 def clean_value(v):
     if pd.isna(v):
         return ""
@@ -83,16 +89,41 @@ def ensure_files():
 
 
 def fix_items_types(df):
-    cols = ["surovina", "mnozstvi", "jednotka", "popis", "poradi"]
+    base_cols = ["nazev", "typ", "surovina", "mnozstvi", "jednotka", "popis", "poradi"]
 
     if df is None or df.empty:
-        df = pd.DataFrame(columns=cols)
+        df = pd.DataFrame(columns=base_cols)
 
-    for c in cols:
+    for c in base_cols:
         if c not in df.columns:
             df[c] = ""
 
-    df = df[cols].copy()
+    df = df.copy()
+
+    df["nazev"] = df["nazev"].apply(clean_value).astype(str)
+    df["typ"] = df["typ"].apply(clean_value).astype(str)
+    df["surovina"] = df["surovina"].apply(clean_value).astype(str)
+    df["mnozstvi"] = df["mnozstvi"].apply(clean_value).astype(str)
+    df["jednotka"] = df["jednotka"].apply(clean_value).astype(str)
+    df["popis"] = df["popis"].apply(clean_value).astype(str)
+
+    df["poradi"] = pd.to_numeric(df["poradi"], errors="coerce").fillna(1).astype(int)
+    df.loc[df["poradi"] < 1, "poradi"] = 1
+
+    return df[base_cols]
+
+
+def fix_editor_items(df):
+    editor_cols = ["surovina", "mnozstvi", "jednotka", "popis", "poradi"]
+
+    if df is None or df.empty:
+        df = pd.DataFrame(columns=editor_cols)
+
+    for c in editor_cols:
+        if c not in df.columns:
+            df[c] = ""
+
+    df = df[editor_cols].copy()
 
     df["surovina"] = df["surovina"].apply(clean_value).astype(str)
     df["mnozstvi"] = df["mnozstvi"].apply(clean_value).astype(str)
@@ -133,7 +164,13 @@ def norm_typ(typ):
 
 def recipe_match(df, nazev, typ):
     if df.empty:
-        return pd.Series(dtype=bool)
+        return pd.Series([False] * len(df))
+
+    if "nazev" not in df.columns:
+        df["nazev"] = ""
+
+    if "typ" not in df.columns:
+        df["typ"] = ""
 
     return (
         df["nazev"].astype(str).str.strip().str.lower().eq(clean_value(nazev).lower())
@@ -170,7 +207,7 @@ def get_recipe_items(nazev, typ):
     out = fix_items_types(out)
     out = out.sort_values(["poradi", "surovina"])
 
-    return out.reset_index(drop=True)
+    return out[["surovina", "mnozstvi", "jednotka", "popis", "poradi"]].reset_index(drop=True)
 
 
 def save_recipe(nazev, typ, postup, poznamka, updated_by, items_df):
@@ -210,7 +247,7 @@ def save_recipe(nazev, typ, postup, poznamka, updated_by, items_df):
     if not df_i.empty:
         df_i = df_i[~recipe_match(df_i, nazev, typ)].copy()
 
-    items_df = fix_items_types(items_df)
+    items_df = fix_editor_items(items_df)
 
     rows = []
     for i, r in items_df.iterrows():
@@ -319,7 +356,7 @@ def display_recipe(nazev, typ):
 
 
 def recipe_data_editor(df, key):
-    df = fix_items_types(df)
+    df = fix_editor_items(df)
 
     return st.data_editor(
         df,
@@ -354,6 +391,9 @@ def recipe_data_editor(df, key):
     )
 
 
+# =========================
+# START
+# =========================
 ensure_files()
 
 st.title("Kuchařka / recepty")
@@ -364,6 +404,9 @@ recepty = list_recipes()
 tab1, tab2 = st.tabs(["🔎 Najít recept", "➕ Přidat nový recept"])
 
 
+# =========================
+# TAB 1 — NAJÍT RECEPT
+# =========================
 with tab1:
     if not recepty:
         st.info("Zatím není uložený žádný recept.")
@@ -406,7 +449,7 @@ with tab1:
                     else:
                         edit_df = items.copy()
 
-                    edit_df = fix_items_types(edit_df)
+                    edit_df = fix_editor_items(edit_df)
 
                     edited_items = recipe_data_editor(
                         edit_df,
@@ -456,6 +499,9 @@ with tab1:
                         st.rerun()
 
 
+# =========================
+# TAB 2 — NOVÝ RECEPT
+# =========================
 with tab2:
     with st.form("new_recipe_form"):
         jmeno = st.selectbox("Kdo zadává", USERS, key="new_user")
@@ -479,7 +525,7 @@ with tab2:
             }
         ])
 
-        start_df = fix_items_types(start_df)
+        start_df = fix_editor_items(start_df)
 
         items_new = recipe_data_editor(
             start_df,
@@ -516,6 +562,9 @@ with tab2:
                 st.rerun()
 
 
+# =========================
+# STAŽENÍ SOUBORŮ
+# =========================
 st.divider()
 
 with st.expander("📥 Stáhnout soubory"):
