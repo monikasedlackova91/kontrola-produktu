@@ -11,8 +11,11 @@ from utils.bedny_lib import (
     mark_done,
     today_prague,
 )
+from auth import check_password
 
 st.set_page_config(page_title="Řidič - bedny", layout="centered")
+
+check_password()
 
 st.markdown("""
 <style>
