@@ -4,7 +4,11 @@ import pandas as pd
 import streamlit as st
 from openpyxl import load_workbook
 
+from auth import check_password
+
 st.set_page_config(page_title="Produkty", page_icon="🍽️", layout="wide")
+
+check_password()
 
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 EXPORT_FILE = os.path.join(DATA_DIR, "export.xlsx")
