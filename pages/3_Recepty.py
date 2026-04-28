@@ -8,9 +8,6 @@ import streamlit as st
 
 st.set_page_config(page_title="Recepty", layout="centered")
 
-# =========================
-# CESTY
-# =========================
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 
@@ -20,7 +17,6 @@ DEFAULT_EXPORT_FILE = os.path.join(BASE_DIR, "export.xlsx")
 RECEPTY_FILE = os.path.join(DATA_DIR, "recepty.xlsx")
 RECEPTY_POLOZKY_FILE = os.path.join(DATA_DIR, "recepty_polozky.xlsx")
 
-EXPORT_SHEET = "export"
 APP_TZ = ZoneInfo("Europe/Prague")
 
 USERS = ["Monika", "Ondra", "Lenka", "Mája", "Iveta", "Tomáš", "Eva", "Anička", "Host"]
@@ -28,9 +24,6 @@ TYPY = ["recept", "komponent", "produkt"]
 JEDNOTKY = ["g", "kg", "ml", "l", "ks", "lžíce", "lžička", "špetka", "dle potřeby", ""]
 
 
-# =========================
-# POMOCNÉ FUNKCE
-# =========================
 def clean_value(v):
     if pd.isna(v):
         return ""
@@ -67,7 +60,7 @@ def ensure_excel_file(path, columns):
             if c not in df.columns:
                 df[c] = ""
 
-        df = df[columns]
+        df = df[columns].fillna("")
         df.to_excel(path, index=False)
 
     except Exception as e:
@@ -89,6 +82,29 @@ def ensure_files():
     )
 
 
+def fix_items_types(df):
+    cols = ["surovina", "mnozstvi", "jednotka", "popis", "poradi"]
+
+    if df is None or df.empty:
+        df = pd.DataFrame(columns=cols)
+
+    for c in cols:
+        if c not in df.columns:
+            df[c] = ""
+
+    df = df[cols].copy()
+
+    df["surovina"] = df["surovina"].apply(clean_value).astype(str)
+    df["mnozstvi"] = df["mnozstvi"].apply(clean_value).astype(str)
+    df["jednotka"] = df["jednotka"].apply(clean_value).astype(str)
+    df["popis"] = df["popis"].apply(clean_value).astype(str)
+
+    df["poradi"] = pd.to_numeric(df["poradi"], errors="coerce").fillna(1).astype(int)
+    df.loc[df["poradi"] < 1, "poradi"] = 1
+
+    return df
+
+
 def load_recepty():
     df = pd.read_excel(RECEPTY_FILE, engine="openpyxl")
     df.columns = [str(c).strip() for c in df.columns]
@@ -98,7 +114,8 @@ def load_recepty():
 def load_polozky():
     df = pd.read_excel(RECEPTY_POLOZKY_FILE, engine="openpyxl")
     df.columns = [str(c).strip() for c in df.columns]
-    return df.fillna("")
+    df = df.fillna("")
+    return fix_items_types(df)
 
 
 def save_recepty(df):
@@ -106,6 +123,7 @@ def save_recepty(df):
 
 
 def save_polozky(df):
+    df = fix_items_types(df)
     df.to_excel(RECEPTY_POLOZKY_FILE, index=False)
 
 
@@ -149,10 +167,10 @@ def get_recipe_items(nazev, typ):
     if out.empty:
         return pd.DataFrame(columns=["surovina", "mnozstvi", "jednotka", "popis", "poradi"])
 
-    out["poradi"] = pd.to_numeric(out["poradi"], errors="coerce").fillna(9999).astype(int)
+    out = fix_items_types(out)
     out = out.sort_values(["poradi", "surovina"])
 
-    return out[["surovina", "mnozstvi", "jednotka", "popis", "poradi"]].reset_index(drop=True)
+    return out.reset_index(drop=True)
 
 
 def save_recipe(nazev, typ, postup, poznamka, updated_by, items_df):
@@ -188,33 +206,27 @@ def save_recipe(nazev, typ, postup, poznamka, updated_by, items_df):
     save_recepty(df_h)
 
     df_i = load_polozky()
+
     if not df_i.empty:
         df_i = df_i[~recipe_match(df_i, nazev, typ)].copy()
 
+    items_df = fix_items_types(items_df)
+
     rows = []
-    if items_df is not None and not items_df.empty:
-        tmp = items_df.copy().fillna("")
+    for i, r in items_df.iterrows():
+        surovina = clean_value(r.get("surovina", ""))
+        if not surovina:
+            continue
 
-        for i, r in tmp.iterrows():
-            surovina = clean_value(r.get("surovina", ""))
-            if not surovina:
-                continue
-
-            poradi = r.get("poradi", i + 1)
-            try:
-                poradi = int(float(poradi))
-            except Exception:
-                poradi = i + 1
-
-            rows.append({
-                "nazev": nazev,
-                "typ": typ,
-                "surovina": surovina,
-                "mnozstvi": clean_value(r.get("mnozstvi", "")),
-                "jednotka": clean_value(r.get("jednotka", "")),
-                "popis": clean_value(r.get("popis", "")),
-                "poradi": poradi,
-            })
+        rows.append({
+            "nazev": nazev,
+            "typ": typ,
+            "surovina": surovina,
+            "mnozstvi": clean_value(r.get("mnozstvi", "")),
+            "jednotka": clean_value(r.get("jednotka", "")),
+            "popis": clean_value(r.get("popis", "")),
+            "poradi": int(r.get("poradi", i + 1)),
+        })
 
     if rows:
         df_i = pd.concat([df_i, pd.DataFrame(rows)], ignore_index=True)
@@ -272,8 +284,9 @@ def display_recipe(nazev, typ):
     if updated_by or updated_at:
         st.caption(f"Naposledy upravil/a: {updated_by} | {updated_at}")
 
-    if clean_value(header.get("poznamka", "")):
-        st.info(clean_value(header.get("poznamka", "")))
+    poznamka = clean_value(header.get("poznamka", ""))
+    if poznamka:
+        st.info(poznamka)
 
     st.markdown("### Suroviny")
 
@@ -287,6 +300,7 @@ def display_recipe(nazev, typ):
             popis = clean_value(r.get("popis", ""))
 
             line = f"**{surovina}**"
+
             if mnozstvi or jednotka:
                 line += f" — {mnozstvi} {jednotka}".strip()
 
@@ -304,22 +318,52 @@ def display_recipe(nazev, typ):
         st.write("_Postup zatím není vyplněný._")
 
 
-# =========================
-# START
-# =========================
+def recipe_data_editor(df, key):
+    df = fix_items_types(df)
+
+    return st.data_editor(
+        df,
+        use_container_width=True,
+        num_rows="dynamic",
+        hide_index=True,
+        key=key,
+        column_config={
+            "poradi": st.column_config.NumberColumn(
+                "Pořadí",
+                min_value=1,
+                step=1,
+                help="Určuje pořadí surovin v receptu."
+            ),
+            "surovina": st.column_config.TextColumn(
+                "Surovina",
+                required=True
+            ),
+            "mnozstvi": st.column_config.TextColumn(
+                "Množství",
+                help="Může být číslo i text: 100, 0.5, špetka, dle potřeby."
+            ),
+            "jednotka": st.column_config.SelectboxColumn(
+                "Jednotka",
+                options=JEDNOTKY
+            ),
+            "popis": st.column_config.TextColumn(
+                "Poznámka"
+            ),
+        },
+        column_order=["poradi", "surovina", "mnozstvi", "jednotka", "popis"],
+    )
+
+
 ensure_files()
 
 st.title("Kuchařka / recepty")
-st.caption("Vyhledej recept a kuchyň uvidí jen to, co opravdu potřebuje.")
+st.caption("Vyhledej recept a kuchyň uvidí jen to, co potřebuje.")
 
 recepty = list_recipes()
 
 tab1, tab2 = st.tabs(["🔎 Najít recept", "➕ Přidat nový recept"])
 
 
-# =========================
-# TAB 1 — NAJÍT
-# =========================
 with tab1:
     if not recepty:
         st.info("Zatím není uložený žádný recept.")
@@ -347,10 +391,12 @@ with tab1:
                     jmeno = st.selectbox("Kdo upravuje", USERS)
 
                     new_nazev = st.text_input("Název receptu", value=nazev)
+
+                    current_typ = typ if typ in TYPY else "recept"
                     new_typ = st.selectbox(
                         "Typ",
                         TYPY,
-                        index=TYPY.index(typ) if typ in TYPY else 0
+                        index=TYPY.index(current_typ)
                     )
 
                     st.markdown("#### Suroviny")
@@ -360,19 +406,11 @@ with tab1:
                     else:
                         edit_df = items.copy()
 
-                    edited_items = st.data_editor(
+                    edit_df = fix_items_types(edit_df)
+
+                    edited_items = recipe_data_editor(
                         edit_df,
-                        use_container_width=True,
-                        num_rows="dynamic",
-                        hide_index=True,
-                        column_config={
-                            "surovina": st.column_config.TextColumn("Surovina", required=True),
-                            "mnozstvi": st.column_config.TextColumn("Množství"),
-                            "jednotka": st.column_config.SelectboxColumn("Jednotka", options=JEDNOTKY),
-                            "popis": st.column_config.TextColumn("Poznámka k surovině"),
-                            "poradi": st.column_config.NumberColumn("Pořadí", min_value=1, step=1),
-                        },
-                        column_order=["poradi", "surovina", "mnozstvi", "jednotka", "popis"],
+                        key=f"editor_edit_{nazev}_{typ}"
                     )
 
                     st.markdown("#### Postup a poznámky")
@@ -381,14 +419,14 @@ with tab1:
                         "Postup",
                         value=clean_value(header.get("postup", "")),
                         height=260,
-                        placeholder="Napiš postup tak, aby podle toho kuchyň opravdu mohla jet..."
+                        placeholder="Napiš postup tak, aby podle toho kuchyň mohla jet..."
                     )
 
                     poznamka = st.text_area(
                         "Obecná poznámka",
                         value=clean_value(header.get("poznamka", "")),
                         height=120,
-                        placeholder="Např. péct den předem, krájet až studené, pozor na sražení krému..."
+                        placeholder="Např. péct den předem, krájet až studené..."
                     )
 
                     col_save, col_delete = st.columns(2)
@@ -407,20 +445,17 @@ with tab1:
                         )
 
                         if clean_value(new_nazev).lower() != clean_value(nazev).lower() or norm_typ(new_typ) != norm_typ(typ):
-                            delete_recipe(nazev, typ)
+                            delete_recipe(nazev=nazev, typ=typ)
 
                         st.success("Recept je uložený.")
                         st.rerun()
 
                     if delete_btn:
-                        delete_recipe(nazev, typ)
+                        delete_recipe(nazev=nazev, typ=typ)
                         st.success("Recept byl smazán.")
                         st.rerun()
 
 
-# =========================
-# TAB 2 — NOVÝ RECEPT
-# =========================
 with tab2:
     with st.form("new_recipe_form"):
         jmeno = st.selectbox("Kdo zadává", USERS, key="new_user")
@@ -435,22 +470,20 @@ with tab2:
         st.markdown("#### Suroviny")
 
         start_df = pd.DataFrame([
-            {"poradi": 1, "surovina": "", "mnozstvi": "", "jednotka": "g", "popis": ""},
+            {
+                "poradi": 1,
+                "surovina": "",
+                "mnozstvi": "",
+                "jednotka": "g",
+                "popis": "",
+            }
         ])
 
-        items_new = st.data_editor(
+        start_df = fix_items_types(start_df)
+
+        items_new = recipe_data_editor(
             start_df,
-            use_container_width=True,
-            num_rows="dynamic",
-            hide_index=True,
-            column_config={
-                "surovina": st.column_config.TextColumn("Surovina", required=True),
-                "mnozstvi": st.column_config.TextColumn("Množství"),
-                "jednotka": st.column_config.SelectboxColumn("Jednotka", options=JEDNOTKY),
-                "popis": st.column_config.TextColumn("Poznámka k surovině"),
-                "poradi": st.column_config.NumberColumn("Pořadí", min_value=1, step=1),
-            },
-            column_order=["poradi", "surovina", "mnozstvi", "jednotka", "popis"],
+            key="editor_new_recipe"
         )
 
         postup = st.text_area(
@@ -483,9 +516,6 @@ with tab2:
                 st.rerun()
 
 
-# =========================
-# STAŽENÍ SOUBORŮ
-# =========================
 st.divider()
 
 with st.expander("📥 Stáhnout soubory"):
