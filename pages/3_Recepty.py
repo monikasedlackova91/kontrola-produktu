@@ -368,8 +368,7 @@ def recipe_data_editor(df, key):
             "poradi": st.column_config.NumberColumn(
                 "Pořadí",
                 min_value=1,
-                step=1,
-                help="Určuje pořadí surovin v receptu."
+                step=1
             ),
             "surovina": st.column_config.TextColumn(
                 "Surovina",
@@ -397,7 +396,7 @@ def recipe_data_editor(df, key):
 ensure_files()
 
 st.title("Kuchařka / recepty")
-st.caption("Vyhledej recept a kuchyň uvidí jen to, co potřebuje.")
+st.caption("Na mobilu hlavně pro rychlé čtení receptů. Zadávání a větší úpravy jsou pohodlnější na počítači.")
 
 recepty = list_recipes()
 
@@ -426,7 +425,9 @@ with tab1:
 
             st.divider()
 
-            with st.expander("✏️ Upravit tento recept"):
+            with st.expander("✏️ Upravit tento recept / pohodlnější na PC"):
+                st.warning("Na telefonu může být úprava tabulky surovin méně pohodlná. Pro zadávání nových receptů je lepší počítač.")
+
                 header = get_recipe_header(nazev, typ) or {}
                 items = get_recipe_items(nazev, typ)
 
@@ -503,6 +504,8 @@ with tab1:
 # TAB 2 — NOVÝ RECEPT
 # =========================
 with tab2:
+    st.info("Nový recept doporučuji zadávat hlavně na počítači, kvůli delšímu postupu a tabulce surovin.")
+
     with st.form("new_recipe_form"):
         jmeno = st.selectbox("Kdo zadává", USERS, key="new_user")
 
@@ -534,7 +537,7 @@ with tab2:
 
         postup = st.text_area(
             "Postup",
-            height=260,
+            height=300,
             placeholder="1. Připrav...\n2. Smíchej...\n3. Peč..."
         )
 
