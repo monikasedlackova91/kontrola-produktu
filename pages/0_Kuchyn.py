@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
+from auth import check_password
 
 st.set_page_config(page_title="Kontrola produktů", layout="centered")
 
